@@ -294,13 +294,29 @@ export async function buildProdDeliveryReport({
   };
 }
 
+/**
+ * Enriches the report from a hand-written PR summary table the repo may keep.
+ * Most repos do not keep one — that is the normal case, not a failure, so a
+ * missing file skips the enrichment instead of killing a report that is already
+ * built. A file that exists but cannot be parsed is still an error worth raising.
+ */
 export async function syncReferenceDescriptionFile(repoPath, report) {
   const filePath = path.join(repoPath, 'data', 'prod-delivery', 'prod-pr-merges-first-5-po-summaries.md');
-  const raw = await readFile(filePath, 'utf8');
+
+  let raw;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    return { updated: false, skipped: 'no-reference-file', appendedPrNumbers: [], rewrittenPrNumbers: [], filePath };
+  }
+
   const lines = raw.split('\n');
   const tableStart = lines.findIndex((line) => line.trim().startsWith('| merge_date |'));
   if (tableStart === -1 || tableStart + 1 >= lines.length) {
-    throw new Error(`Could not find PR summary table in ${filePath}`);
+    throw new Error(
+      `${filePath} has no PR summary table — it needs a markdown table whose header row starts with "| merge_date |".`,
+    );
   }
 
   const tableEnd = findTableEnd(lines, tableStart);

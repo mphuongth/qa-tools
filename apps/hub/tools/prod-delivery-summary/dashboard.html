@@ -297,10 +297,15 @@ async function loadReport(){
   if(!response.ok) throw new Error(payload.error||'Failed to load report');
   state=payload;
   renderAll();
+  const base=`Report refreshed for ${formatRangeLabel(payload.range)} · ${payload.totalPrs} PRs.`;
   if(payload.sync?.updated){
     setStatus(`Report refreshed. Added ${payload.sync.appendedPrNumbers.length} new PR${payload.sync.appendedPrNumbers.length===1?'':'s'} to the source markdown.`);
+  }else if(payload.sync?.skipped==='no-reference-file'){
+    // Most repos keep no summary table, so say the descriptions are heuristic
+    // rather than leaving the difference invisible.
+    setStatus(`${base} This repo keeps no PR summary table, so descriptions come from titles and paths.`);
   }else{
-    setStatus(`Report refreshed for ${formatRangeLabel(payload.range)} · ${payload.totalPrs} PRs.`);
+    setStatus(base);
   }
 }
 
