@@ -113,13 +113,20 @@
       margin: 6px 0 4px;
     }
 
+    /* Two of these are buttons and one is a link, so the shared button rules —
+       centred content, fixed height — have to be undone or the rows do not line
+       up with each other. */
     .nav-item {
       display: flex;
       align-items: center;
+      justify-content: flex-start;
       gap: 10px;
-      padding: 9px 12px;
+      height: auto;
+      min-height: 36px;
+      padding: 6px 12px;
       border-radius: 6px;
       font-size: 13.5px;
+      line-height: 1.4;
       font-weight: 500;
       color: var(--text2);
       cursor: pointer;
