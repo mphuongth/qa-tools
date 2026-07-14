@@ -20,11 +20,18 @@ Need to shrink a screen recording before attaching it to a PR? That lives in
 ## The hub
 
 ```bash
-pnpm serve   # http://127.0.0.1:4311
+pnpm serve   # http://127.0.0.1:4380
 ```
 
 Enter a GitHub repo (`owner/name` or a full URL) in the box at the top of the page and every tool
 follows it. The choice is saved, so it survives a restart, and can be changed at any time.
+
+To move the hub off port 4380 — it clashes with something, or you want two copies running — set
+`QA_TOOLS_PORT`:
+
+```bash
+QA_TOOLS_PORT=4381 pnpm serve
+```
 
 `prod-delivery-summary` reads git history rather than the API, so the hub clones the selected repo
 into a local cache (`~/.cache/qa-tools`) the first time it runs and refreshes it afterwards.
