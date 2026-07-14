@@ -152,6 +152,134 @@
 
     .repo-status.warn { color: var(--accent); }
 
+    .approvers {
+      margin-top: 18px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+    }
+
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+
+    .chips:empty { display: none; }
+
+    .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 6px 4px 4px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 12px;
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+
+    .chip img {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+    }
+
+    .chip button {
+      padding: 0 2px;
+      font-size: 13px;
+      line-height: 1;
+      color: var(--text3);
+      background: none;
+      border: none;
+      cursor: pointer;
+    }
+
+    .chip button:hover { color: var(--accent); }
+
+    .approver-picker { position: relative; }
+
+    .approver-picker input {
+      width: 100%;
+      padding: 10px 12px;
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-size: 13px;
+      color: var(--text);
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+    }
+
+    .approver-picker input:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    .approver-list {
+      position: absolute;
+      z-index: 5;
+      top: calc(100% + 4px);
+      left: 0;
+      right: 0;
+      max-height: 240px;
+      overflow-y: auto;
+      background: var(--surface-strong);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      box-shadow: 0 12px 24px rgba(28, 24, 18, 0.14);
+    }
+
+    .approver-list[hidden] { display: none; }
+
+    .approver-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 10px;
+      font-family: inherit;
+      font-size: 13px;
+      text-align: left;
+      color: var(--text);
+      background: none;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+
+    .approver-option:last-child { border-bottom: none; }
+    .approver-option:hover { background: var(--bg); }
+
+    .approver-option img {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      flex: 0 0 auto;
+    }
+
+    .approver-option .login {
+      font-family: "JetBrains Mono", ui-monospace, monospace;
+      font-weight: 600;
+    }
+
+    .approver-option .source {
+      margin-left: auto;
+      font-size: 11px;
+      color: var(--text3);
+    }
+
+    .approver-option[aria-selected="true"] .source::after {
+      content: " • selected";
+      color: var(--accent);
+    }
+
+    .approver-hint {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--text3);
+      line-height: 1.5;
+    }
+
     .tools {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 260px));
@@ -276,6 +404,25 @@
         <button id="repo-save" type="button">Save</button>
       </div>
       <p class="repo-status" id="repo-status">Loading…</p>
+
+      <div class="approvers">
+        <label for="approver-search">Required approvers</label>
+        <div class="chips" id="approver-chips"></div>
+        <div class="approver-picker">
+          <input
+            id="approver-search"
+            type="text"
+            placeholder="Search people in this repo…"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <div class="approver-list" id="approver-list" hidden></div>
+        </div>
+        <p class="approver-hint" id="approver-hint">
+          A PR counts as <strong>Approved</strong> only once every person listed here has approved it.
+          Pick two people and both approvals are needed. Leave it empty and any single approval is enough.
+        </p>
+      </div>
     </section>
 
     <section class="tools" id="tools"></section>
@@ -285,11 +432,26 @@
     const repoInput = document.getElementById('repo-input');
     const trackBaseInput = document.getElementById('track-base-input');
     const repoStatus = document.getElementById('repo-status');
+    const approverChips = document.getElementById('approver-chips');
+    const approverSearch = document.getElementById('approver-search');
+    const approverList = document.getElementById('approver-list');
+    const approverHint = document.getElementById('approver-hint');
+
+    const SOURCE_LABELS = {
+      collaborator: 'collaborator',
+      requested: 'review requested',
+      approved: 'approved before',
+      reviewed: 'reviewed before',
+    };
+
+    let selectedApprovers = [];
+    let reviewerCandidates = [];
 
     async function loadSettings() {
       const response = await fetch('/api/settings');
       const settings = await response.json();
       applySettings(settings);
+      loadReviewers();
     }
 
     function applySettings(settings) {
@@ -299,7 +461,158 @@
         ? `Tools are running against ${settings.repo}.`
         : 'No repo selected yet. Enter one to enable the PR tracker and delivery summary.';
       repoStatus.classList.toggle('warn', !settings.repo);
+
+      selectedApprovers = String(settings.requiredApprovers || '')
+        .split(',')
+        .map((login) => login.trim())
+        .filter(Boolean)
+        .map((login) => ({ login, avatarUrl: avatarFor(login) }));
+      renderApprovers();
     }
+
+    function avatarFor(login) {
+      const match = reviewerCandidates.find(
+        (person) => person.login.toLowerCase() === login.toLowerCase(),
+      );
+      return match ? match.avatarUrl : '';
+    }
+
+    /** The picker is a convenience, so a repo that will not list its people is not an error. */
+    async function loadReviewers() {
+      if (!repoInput.value.trim()) {
+        reviewerCandidates = [];
+        renderApprovers();
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/reviewers');
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Could not load people from the repo');
+        reviewerCandidates = payload.reviewers || [];
+        selectedApprovers = selectedApprovers.map((person) => ({
+          ...person,
+          avatarUrl: person.avatarUrl || avatarFor(person.login),
+        }));
+      } catch {
+        reviewerCandidates = [];
+      }
+      renderApprovers();
+    }
+
+    function isSelected(login) {
+      return selectedApprovers.some((person) => person.login.toLowerCase() === login.toLowerCase());
+    }
+
+    function toggleApprover(person) {
+      selectedApprovers = isSelected(person.login)
+        ? selectedApprovers.filter((item) => item.login.toLowerCase() !== person.login.toLowerCase())
+        : [...selectedApprovers, person];
+      approverSearch.value = '';
+      renderApprovers();
+    }
+
+    function renderApprovers() {
+      renderChips();
+      renderOptions();
+      updateHint();
+    }
+
+    function renderChips() {
+      approverChips.replaceChildren(
+        ...selectedApprovers.map((person) => {
+          const chip = document.createElement('span');
+          chip.className = 'chip';
+
+          if (person.avatarUrl) {
+            const avatar = document.createElement('img');
+            avatar.src = person.avatarUrl;
+            avatar.alt = '';
+            chip.append(avatar);
+          }
+
+          chip.append(person.login);
+
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.textContent = '✕';
+          remove.title = `Remove ${person.login}`;
+          remove.addEventListener('click', () => toggleApprover(person));
+          chip.append(remove);
+
+          return chip;
+        }),
+      );
+    }
+
+    function renderOptions() {
+      const query = approverSearch.value.trim().replace(/^@/, '').toLowerCase();
+      const matches = reviewerCandidates.filter((person) => person.login.toLowerCase().includes(query));
+      const options = matches.map(buildOption);
+
+      // A login GitHub knows but this repo has never seen still needs a way in.
+      // It is validated server-side on save, so a typo cannot slip through.
+      if (query && !matches.some((person) => person.login.toLowerCase() === query)) {
+        options.push(buildOption({ login: approverSearch.value.trim().replace(/^@/, ''), avatarUrl: '', sources: ['manual'] }));
+      }
+
+      approverList.replaceChildren(...options);
+      approverList.hidden = !options.length || document.activeElement !== approverSearch;
+    }
+
+    function buildOption(person) {
+      const option = document.createElement('button');
+      option.type = 'button';
+      option.className = 'approver-option';
+      option.setAttribute('aria-selected', String(isSelected(person.login)));
+
+      if (person.avatarUrl) {
+        const avatar = document.createElement('img');
+        avatar.src = person.avatarUrl;
+        avatar.alt = '';
+        option.append(avatar);
+      }
+
+      const login = document.createElement('span');
+      login.className = 'login';
+      login.textContent = person.login;
+      option.append(login);
+
+      const source = document.createElement('span');
+      source.className = 'source';
+      source.textContent =
+        person.sources?.[0] === 'manual'
+          ? 'add this login'
+          : SOURCE_LABELS[person.sources?.[0]] || '';
+      option.append(source);
+
+      // mousedown, not click: the input's blur would tear the list down first.
+      option.addEventListener('mousedown', (event) => {
+        event.preventDefault();
+        toggleApprover({ login: person.login, avatarUrl: person.avatarUrl || '' });
+      });
+
+      return option;
+    }
+
+    function updateHint() {
+      const count = selectedApprovers.length;
+      approverHint.innerHTML =
+        count === 0
+          ? 'No one is required yet, so a PR turns <strong>Approved</strong> on any single approval. Pick people above to require them by name.'
+          : `A PR turns <strong>Approved</strong> only when all ${count} of them (${selectedApprovers
+              .map((person) => person.login)
+              .join(', ')}) have approved it. Save to apply.`;
+    }
+
+    approverSearch.addEventListener('input', renderOptions);
+    approverSearch.addEventListener('focus', renderOptions);
+    approverSearch.addEventListener('blur', () => {
+      approverList.hidden = true;
+    });
+    approverSearch.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') approverList.hidden = true;
+    });
 
     async function saveSettings() {
       repoStatus.textContent = 'Saving…';
@@ -308,11 +621,16 @@
         const response = await fetch('/api/settings', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ repo: repoInput.value, trackBase: trackBaseInput.value }),
+          body: JSON.stringify({
+            repo: repoInput.value,
+            trackBase: trackBaseInput.value,
+            requiredApprovers: selectedApprovers.map((person) => person.login),
+          }),
         });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.error || 'Could not save the repo');
         applySettings(payload);
+        loadReviewers();
       } catch (error) {
         repoStatus.textContent = error.message;
         repoStatus.classList.add('warn');

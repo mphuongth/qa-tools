@@ -61,7 +61,7 @@ Every key is optional:
 | `repo` | all | Default repo, so you can omit `--repo` |
 | `platforms` | tracker, delivery | Platform buckets and the path prefixes that map into them |
 | `pathRules` / `keywordRules` | qa-pr-impact | Map changed paths and PR text to QA areas |
-| `requiredApprovers` | tracker | Logins that must approve before a PR counts as `Approved` |
+| `requiredApprovers` | tracker | Logins that must **all** approve before a PR counts as `Approved` (also settable in the hub UI) |
 | `devAliases` | tracker | Short display names for GitHub authors |
 | `bypassPrs` | tracker | PR numbers to ignore entirely |
 | `aggregateRefs` | delivery | Promotion branches whose merges should not count as delivered work |

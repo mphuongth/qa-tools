@@ -66,7 +66,16 @@ The headline date uses **system local time** unless you set `--report-timezone A
 
 ## Required approvers
 
-There is no default — a PR is marked `Approved` once every listed approver has approved. Use GitHub logins:
+There is no default — a PR is marked `Approved` once **every** listed approver has approved it, so
+listing two people means both approvals are needed. With the list empty, any single approving review
+is enough.
+
+The easiest way to set this is the **Required approvers** picker on the hub home page: it lists the
+repo's collaborators plus anyone who has reviewed a recent PR, and it checks any hand-typed login
+against GitHub before saving, so a misspelled name cannot silently hold every PR at `Pending`.
+Changing the list only affects statuses on the next **Sync**.
+
+From the CLI, use GitHub logins:
 
 ```bash
 --required-approvers "alice,bob"

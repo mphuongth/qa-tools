@@ -124,6 +124,12 @@ const PROD_DELIVERY_GENERATED_DIR = TOOL_BY_ID.get('prod-delivery-summary').gene
 const PR_TRACKER_AUTO_SYNC_ENABLED = normalizeBooleanEnv(process.env.PR_TRACKER_AUTO_SYNC_ENABLED, true);
 const PR_TRACKER_AUTO_SYNC_TIME = normalizeScheduleTime(process.env.PR_TRACKER_AUTO_SYNC_TIME || '17:30');
 
+const REVIEWER_CACHE_TTL_MS = 5 * 60 * 1000;
+/** repo slug -> { at, payload } for the approver picker. */
+const reviewerCandidateCache = new Map();
+/** lowercased login -> canonical GitHub login, or null when GitHub says it does not exist. */
+const validatedLogins = new Map();
+
 let prTrackerSyncPromise = null;
 let prTrackerAutoSyncTimer = null;
 const prTrackerAutoSyncState = {
@@ -176,6 +182,10 @@ async function handleRequest(req, res) {
       }
     }
 
+    if (req.method === 'GET' && url.pathname === '/api/reviewers') {
+      return sendJson(res, 200, await buildReviewerCandidates());
+    }
+
     if (toolApi?.tool?.id === 'file-compressor' && req.method === 'POST' && toolApi.action === 'compress-video') {
       return compressVideoUpload(req, res);
     }
@@ -189,7 +199,8 @@ async function handleRequest(req, res) {
 
     return sendJson(res, 404, { error: 'Not found' });
   } catch (error) {
-    return sendJson(res, 500, { error: error.message || 'Unexpected error' });
+    // Bad input from the UI (an unknown login, say) is a 400, not a server fault.
+    return sendJson(res, error.status || 500, { error: error.message || 'Unexpected error' });
   }
 }
 
@@ -214,7 +225,13 @@ async function saveHubSettings(patch) {
     next.repo = raw ? parseRepoRef(raw).slug : '';
   }
   if (patch.timezone !== undefined) next.timezone = String(patch.timezone).trim();
-  if (patch.requiredApprovers !== undefined) next.requiredApprovers = String(patch.requiredApprovers).trim();
+  if (patch.requiredApprovers !== undefined) {
+    // A typo here would silently hold every PR at Pending forever, since a login
+    // that cannot approve can never be satisfied. Confirm each one with GitHub
+    // and store the casing GitHub itself uses.
+    const logins = parseApproverList(patch.requiredApprovers);
+    next.requiredApprovers = logins.length ? (await canonicalApproverLogins(logins)).join(',') : '';
+  }
   if (patch.trackBase !== undefined) next.trackBase = String(patch.trackBase).trim() || 'dev';
 
   hubSettings = next;
@@ -255,7 +272,141 @@ async function activeRepoPath(config) {
 
 function activeRequiredApprovers(config) {
   const raw = hubSettings.requiredApprovers || (config.requiredApprovers || []).join(',');
-  return raw.split(',').map((item) => item.trim()).filter(Boolean);
+  return parseApproverList(raw);
+}
+
+/** Accepts a comma string or an array; drops blanks, `@` prefixes, and duplicates. */
+function parseApproverList(value) {
+  const items = Array.isArray(value) ? value : String(value ?? '').split(',');
+  const seen = new Set();
+  const logins = [];
+
+  for (const item of items) {
+    const login = String(item ?? '').trim().replace(/^@/, '');
+    if (!login || seen.has(login.toLowerCase())) continue;
+    seen.add(login.toLowerCase());
+    logins.push(login);
+  }
+
+  return logins;
+}
+
+/** Rejects logins GitHub does not know, and rewrites the rest to GitHub's own casing. */
+async function canonicalApproverLogins(logins) {
+  const token = await resolveGithubToken();
+  const canonical = [];
+
+  for (const login of logins) {
+    const key = login.toLowerCase();
+
+    if (!validatedLogins.has(key)) {
+      const user = await githubJson(`/users/${encodeURIComponent(login)}`, token, { allow404: true });
+      validatedLogins.set(key, user?.login || null);
+    }
+
+    const known = validatedLogins.get(key);
+    if (!known) {
+      const error = new Error(
+        `"${login}" is not a GitHub user. Pick a name from the list, or check the spelling.`,
+      );
+      error.status = 400;
+      throw error;
+    }
+    canonical.push(known);
+  }
+
+  return canonical;
+}
+
+/**
+ * People who can plausibly be required approvers on the selected repo. Listing
+ * collaborators needs a token with push access, so review history from recent
+ * PRs backfills the list whenever that call is denied.
+ */
+async function buildReviewerCandidates() {
+  if (!hubSettings.repo) {
+    throw new Error('No repo selected. Set a GitHub repo at the top of the page first.');
+  }
+
+  const { slug } = parseRepoRef(hubSettings.repo);
+  const cached = reviewerCandidateCache.get(slug);
+  if (cached && Date.now() - cached.at < REVIEWER_CACHE_TTL_MS) return cached.payload;
+
+  const token = await resolveGithubToken();
+  const people = new Map();
+  const addPerson = (user, source) => {
+    const login = String(user?.login || '').trim();
+    if (!login || user.type === 'Bot' || login.endsWith('[bot]')) return;
+
+    const existing = people.get(login.toLowerCase());
+    if (existing) {
+      if (!existing.sources.includes(source)) existing.sources.push(source);
+      return;
+    }
+    people.set(login.toLowerCase(), { login, avatarUrl: user.avatar_url || '', sources: [source] });
+  };
+
+  const collaborators = await githubJson(`/repos/${slug}/collaborators?per_page=100`, token, {
+    allow403: true,
+    allow404: true,
+  });
+  if (Array.isArray(collaborators)) {
+    for (const user of collaborators) addPerson(user, 'collaborator');
+  }
+
+  const pulls = await githubJson(
+    `/repos/${slug}/pulls?state=all&sort=updated&direction=desc&per_page=30`,
+    token,
+    { allow404: true },
+  );
+  const recentPulls = Array.isArray(pulls) ? pulls : [];
+
+  // requested_reviewers rides along on the PR list, so pending review requests
+  // cost nothing extra; only the actual reviews need a call per PR.
+  for (const pull of recentPulls) {
+    for (const user of pull.requested_reviewers || []) addPerson(user, 'requested');
+  }
+
+  const reviewPages = await Promise.all(
+    recentPulls.slice(0, 15).map((pull) =>
+      githubJson(`/repos/${slug}/pulls/${pull.number}/reviews?per_page=100`, token, { allow404: true }).catch(
+        () => null,
+      ),
+    ),
+  );
+  for (const reviews of reviewPages) {
+    if (!Array.isArray(reviews)) continue;
+    for (const review of reviews) {
+      addPerson(review.user, String(review.state).toUpperCase() === 'APPROVED' ? 'approved' : 'reviewed');
+    }
+  }
+
+  const payload = {
+    repo: slug,
+    collaboratorsVisible: Array.isArray(collaborators),
+    reviewers: [...people.values()].sort((a, b) => a.login.localeCompare(b.login)),
+  };
+  reviewerCandidateCache.set(slug, { at: Date.now(), payload });
+  return payload;
+}
+
+async function githubJson(resource, token, { allow403 = false, allow404 = false } = {}) {
+  const url = resource.startsWith('http') ? resource : `https://api.github.com${resource}`;
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'User-Agent': 'qa-tools-hub',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+  });
+
+  if (!response.ok) {
+    if (allow404 && response.status === 404) return null;
+    if (allow403 && response.status === 403) return null;
+    throw new Error(`GitHub API ${response.status} for ${url}: ${await response.text()}`);
+  }
+
+  return response.json();
 }
 
 async function readFirstExisting(filePaths, encoding) {
