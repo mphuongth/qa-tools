@@ -31,6 +31,8 @@ const APP_DIR = __dirname;
 const TOOLS_UI_DIR = path.join(APP_DIR, 'tools');
 const GENERATED_ROOT = path.join(APP_DIR, '.generated');
 const LANDING_HTML_PATHS = [path.join(APP_DIR, 'landing.html')];
+/** One stylesheet for every page, so the hub and its tools stay one system. */
+const CONSOLE_CSS_PATH = path.join(APP_DIR, 'assets', 'console.css');
 const SERVER_ERROR_LOG = path.join(GENERATED_ROOT, 'server-error.log');
 const HUB_SETTINGS_PATH = path.join(GENERATED_ROOT, 'hub-settings.json');
 
@@ -45,6 +47,10 @@ let hubSettings = {
   trackBase: process.env.PR_TRACKER_BASE_BRANCH || 'dev',
 };
 
+/**
+ * `needsRepo` and `produces` are what the run sheet on the landing page reads:
+ * what an instrument needs before it will run, and what it hands you when it does.
+ */
 const TOOL_CONFIG = {
   prTracker: {
     id: 'pr-tracker',
@@ -54,6 +60,7 @@ const TOOL_CONFIG = {
     icon: 'pr-tracker',
     trackerJson: process.env.PR_TRACKER_JSON || path.join(os.homedir(), 'Downloads', 'pr-tracker-backup.json'),
     needsRepo: true,
+    produces: 'Slack update',
   },
   prodDeliverySummary: {
     id: 'prod-delivery-summary',
@@ -63,6 +70,7 @@ const TOOL_CONFIG = {
     icon: 'prod-delivery-summary',
     defaultMonths: Number(process.env.PROD_DELIVERY_DEFAULT_MONTHS || 6),
     needsRepo: true,
+    produces: 'Markdown report',
   },
   qaPrImpact: {
     id: 'qa-pr-impact',
@@ -71,6 +79,7 @@ const TOOL_CONFIG = {
       'Paste a GitHub PR link and get a QA-focused verification plan: primary areas, related regression areas, and suggested manual test cases.',
     icon: 'qa-pr-impact',
     needsRepo: false,
+    produces: 'Test plan',
   },
 };
 
@@ -152,6 +161,10 @@ async function handleRequest(req, res) {
 
     if (req.method === 'GET' && toolPage) {
       return send(res, 200, await readFirstExisting(toolPage.htmlPaths, 'utf8'), 'text/html; charset=utf-8');
+    }
+
+    if (req.method === 'GET' && url.pathname === '/assets/console.css') {
+      return send(res, 200, await readFile(CONSOLE_CSS_PATH, 'utf8'), 'text/css; charset=utf-8');
     }
 
     if (req.method === 'GET' && url.pathname === '/api/tools') {
@@ -410,6 +423,8 @@ function buildToolsPayload() {
       href: `/tools/${tool.slug}`,
       command: tool.command,
       icon: tool.icon || tool.id,
+      needs: tool.needsRepo ? 'Repo' : 'PR link',
+      produces: tool.produces || '',
     })),
   };
 }
