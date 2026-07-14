@@ -1,0 +1,104 @@
+{
+  "$comment": "Starter profile. Copy to qa-tools.profile.json in your project (or profiles/<owner>-<repo>.json) and edit. Every field is optional — omit what you do not need and the tools fall back to auto-detection.",
+
+  "repo": "owner/name",
+  "trackBase": "dev",
+  "prodBranch": "prod",
+  "requiredApprovers": [],
+  "aggregateRefs": [],
+
+  "platforms": {
+    "$comment": "Omit this whole block to let the tools auto-detect platforms from the repo's apps/* directories.",
+    "order": ["Web", "Mobile", "Backend", "Deployment", "E2E", "Unit-test", "Other"],
+    "prefixes": [
+      ["apps/web/", "Web"],
+      ["apps/mobile/", "Mobile"],
+      ["apps/api/", "Backend"],
+      ["services/", "Backend"],
+      ["workers/", "Backend"],
+      [".github/workflows/", "Deployment"]
+    ],
+    "meta": {
+      "Web": { "key": "web", "intro": "Web app and related rollout work." },
+      "Mobile": { "key": "mobile", "intro": "Mobile apps and related rollout work." },
+      "Backend": { "key": "backend", "intro": "APIs, services, and background workers." }
+    }
+  },
+
+  "pathRules": [
+    {
+      "match": ["**/api/subscription/**", "**/*stripe*", "**/*billing*", "**/subscription/**"],
+      "areas": ["subscription", "billing", "account"],
+      "related": ["checkout", "entitlement"],
+      "confidence": "high"
+    },
+    {
+      "match": ["**/api/auth/**", "**/signin/**", "**/signup/**", "**/*auth*", "**/*password*"],
+      "areas": ["signin", "signup", "password reset"],
+      "related": ["session", "account"],
+      "confidence": "high"
+    },
+    {
+      "match": ["**/checkout/**", "**/*payment*", "**/*invoice*"],
+      "areas": ["checkout", "billing"],
+      "related": ["subscription"],
+      "confidence": "high"
+    },
+    {
+      "match": ["**/account/**", "**/profile/**", "**/settings/**"],
+      "areas": ["account"],
+      "related": ["signin", "session"],
+      "confidence": "medium"
+    },
+    {
+      "match": ["**/search/**", "**/*algolia*", "**/*elasticsearch*"],
+      "areas": ["search"],
+      "related": ["video discovery"],
+      "confidence": "medium"
+    },
+    {
+      "match": ["**/player/**", "**/*video*", "**/*playback*"],
+      "areas": ["video playback"],
+      "related": ["video detail"],
+      "confidence": "medium"
+    },
+    {
+      "match": ["**/*analytics*", "**/*tracking*", "**/*segment*"],
+      "areas": ["analytics tracking"],
+      "related": [],
+      "confidence": "low"
+    },
+    {
+      "match": [".github/workflows/**", "**/Dockerfile", "**/*.tf"],
+      "areas": ["web smoke flows"],
+      "related": [],
+      "confidence": "low"
+    }
+  ],
+
+  "keywordRules": [
+    { "keywords": ["signin", "login", "auth"], "areas": ["signin"], "related": ["session", "account"], "confidence": "medium" },
+    { "keywords": ["signup", "register"], "areas": ["signup"], "related": ["signin"], "confidence": "medium" },
+    { "keywords": ["password", "forgot password", "otp"], "areas": ["password reset"], "related": ["signin", "session"], "confidence": "medium" },
+    { "keywords": ["account", "profile", "delete account", "change email"], "areas": ["account"], "related": ["signin", "subscription"], "confidence": "medium" },
+    { "keywords": ["subscribe", "subscription", "paywall", "plan"], "areas": ["subscription"], "related": ["billing", "entitlement"], "confidence": "medium" },
+    { "keywords": ["billing", "stripe", "checkout", "payment"], "areas": ["billing", "checkout"], "related": ["subscription"], "confidence": "medium" },
+    { "keywords": ["gift", "redeem"], "areas": ["gift flow"], "related": ["video access", "checkout"], "confidence": "medium" },
+    { "keywords": ["search"], "areas": ["search"], "related": ["video discovery"], "confidence": "medium" },
+    { "keywords": ["video", "player", "playback"], "areas": ["video playback"], "related": ["video detail"], "confidence": "medium" },
+    { "keywords": ["livestream", "live stream"], "areas": ["live stream"], "related": ["video playback"], "confidence": "medium" },
+    { "keywords": ["live chat", "chat"], "areas": ["live chat"], "related": ["signin"], "confidence": "medium" },
+    { "keywords": ["moderation"], "areas": ["chat moderation"], "related": ["live chat"], "confidence": "medium" },
+    { "keywords": ["watchlist"], "areas": ["watchlist"], "related": ["video detail"], "confidence": "medium" },
+    { "keywords": ["offline", "download"], "areas": ["offline mode", "downloads"], "related": ["video playback"], "confidence": "medium" },
+    { "keywords": ["history"], "areas": ["watch history"], "related": ["video playback"], "confidence": "medium" },
+    { "keywords": ["form submission", "submitform"], "areas": ["form submissions"], "related": [], "confidence": "medium" },
+    { "keywords": ["navigation", "route", "screen"], "areas": ["navigation"], "related": [], "confidence": "low" },
+    { "keywords": ["analytics", "tracking"], "areas": ["analytics tracking"], "related": [], "confidence": "low" },
+    { "keywords": ["cms", "collection", "block"], "areas": ["cms content"], "related": ["content presentation"], "confidence": "low" }
+  ],
+
+  "prOverrides": {
+    "$comment": "Optional. Pin a platform and/or a hand-written description for specific PR numbers, e.g. \"1234\": { \"platform\": \"Web\", \"description\": \"...\" }."
+  }
+}

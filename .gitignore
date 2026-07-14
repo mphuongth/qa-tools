@@ -1,0 +1,9 @@
+node_modules/
+.DS_Store
+
+# Local project config and generated reports
+qa-tools.profile.json
+pr-tracker-backup.json
+*-slack-message.txt
+*-generated.html
+generated/

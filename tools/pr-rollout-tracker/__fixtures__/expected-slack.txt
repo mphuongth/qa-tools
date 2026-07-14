@@ -1,0 +1,15 @@
+PRs submitted for rollout (14 Apr 2026)
+
+✅ MERGED TO DEV (NOT PRODUCTION)
+1. [Alex] [Mar 13] https://github.com/acme/monorepo/pull/5031 - T merged
+
+✅ APPROVED
+1. [Blake] [Feb 03] https://github.com/acme/monorepo/pull/5023 - T approved
+
+❌ NOT APPROVED YET
+🔴 High Priority
+Mobile
+1. [Casey] [Mar 10] https://github.com/acme/monorepo/pull/5137 - T pending high
+🟡 Medium Priority
+Web
+1. [Alex] [Mar 25] https://github.com/acme/monorepo/pull/5201 - T pending med

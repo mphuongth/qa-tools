@@ -1,0 +1,63 @@
+[
+  {
+    "num": "5031",
+    "dev": "Alex",
+    "date": "Mar 13",
+    "platform": "Web",
+    "title": "T merged",
+    "url": "https://github.com/acme/monorepo/pull/5031",
+    "prio": "Medium",
+    "status": "Merged"
+  },
+  {
+    "num": "5023",
+    "dev": "Blake",
+    "date": "Feb 03",
+    "platform": "Mobile",
+    "title": "T approved",
+    "url": "https://github.com/acme/monorepo/pull/5023",
+    "prio": "Medium",
+    "status": "Approved"
+  },
+  {
+    "num": "5137",
+    "dev": "Casey",
+    "date": "Mar 10",
+    "platform": "Mobile",
+    "title": "T pending high",
+    "url": "https://github.com/acme/monorepo/pull/5137",
+    "prio": "High",
+    "status": "Pending"
+  },
+  {
+    "num": "5201",
+    "dev": "Alex",
+    "date": "Mar 25",
+    "platform": "Web",
+    "title": "T pending med",
+    "url": "https://github.com/acme/monorepo/pull/5201",
+    "prio": "Medium",
+    "status": "Pending"
+  },
+  {
+    "num": "4454",
+    "dev": "Alex",
+    "date": "Sep 02",
+    "platform": "Other",
+    "title": "T hold",
+    "url": "https://github.com/acme/monorepo/pull/4454",
+    "prio": "Low",
+    "status": "Hold"
+  },
+  {
+    "num": "5999",
+    "dev": "Alex",
+    "date": "Apr 01",
+    "platform": "Web",
+    "title": "Draft only fixture",
+    "url": "https://github.com/acme/monorepo/pull/5999",
+    "prio": "Medium",
+    "status": "Pending",
+    "draft": true
+  }
+]

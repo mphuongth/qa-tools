@@ -1,0 +1,16 @@
+{
+  "name": "qa-tools",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Repo-agnostic QA tooling: PR rollout tracking, QA impact analysis, and production delivery summaries for any GitHub repo.",
+  "scripts": {
+    "pr-tracker": "node tools/pr-rollout-tracker/index.mjs",
+    "pr-tracker:verify": "node tools/pr-rollout-tracker/verify-slack-format.mjs",
+    "qa:pr-impact": "node tools/qa-pr-impact/index.mjs",
+    "prod-delivery-summary": "node tools/prod-delivery-summary/index.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

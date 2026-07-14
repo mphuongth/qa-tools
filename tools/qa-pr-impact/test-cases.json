@@ -1,0 +1,314 @@
+{
+  "subscription": {
+    "must": [
+      "Verify an active subscriber can access subscriber-only content.",
+      "Verify subscription status is correct on the account or billing screen.",
+      "Verify renewal, cancellation, or plan-change state is reflected correctly."
+    ],
+    "nice": [
+      "Verify a previously expired user does not keep access incorrectly.",
+      "Verify entitlement updates appear without misleading status or messaging."
+    ]
+  },
+  "billing": {
+    "must": [
+      "Verify billing details and subscription state display the expected values.",
+      "Verify checkout or payment-related errors show clear user-facing feedback."
+    ],
+    "nice": [
+      "Verify failed or incomplete billing states do not grant paid access."
+    ]
+  },
+  "account": {
+    "must": [
+      "Verify the account screen loads without missing data or broken sections.",
+      "Verify account details, subscription details, or settings show the expected state."
+    ],
+    "nice": [
+      "Verify navigation into and out of account settings works without session issues."
+    ]
+  },
+  "checkout": {
+    "must": [
+      "Verify the checkout flow reaches the expected confirmation or next step.",
+      "Verify invalid or interrupted payment states are handled correctly."
+    ],
+    "nice": [
+      "Verify users are returned to the correct screen after checkout completes."
+    ]
+  },
+  "entitlement": {
+    "must": [
+      "Verify paid-only content is accessible only for the correct subscription state.",
+      "Verify entitlement changes take effect on the relevant screens without stale access."
+    ],
+    "nice": [
+      "Verify a sign-out and sign-in cycle does not restore the wrong access state."
+    ]
+  },
+  "mobile subscription": {
+    "must": [
+      "Verify the mobile subscription state matches the user’s current purchase state.",
+      "Verify restored or active purchases grant the expected access in the app."
+    ],
+    "nice": [
+      "Verify a non-subscriber is still blocked from subscriber-only content on mobile."
+    ]
+  },
+  "signin": {
+    "must": [
+      "Verify sign in succeeds with a valid account.",
+      "Verify sign in fails with an invalid password and shows the correct error.",
+      "Verify the signed-in session persists after refresh or app reopen."
+    ],
+    "nice": [
+      "Verify sign out and sign back in works without stale session behavior."
+    ]
+  },
+  "signup": {
+    "must": [
+      "Verify a new user can complete sign up successfully.",
+      "Verify validation and error messages appear correctly for invalid inputs."
+    ],
+    "nice": [
+      "Verify the new account lands on the expected post-signup screen."
+    ]
+  },
+  "password reset": {
+    "must": [
+      "Verify forgot-password or reset-password flow completes successfully.",
+      "Verify the user can sign in with the new password afterward."
+    ],
+    "nice": [
+      "Verify invalid or expired reset attempts show the correct message."
+    ]
+  },
+  "session": {
+    "must": [
+      "Verify the user remains signed in across refresh, navigation, or app reopen.",
+      "Verify protected screens redirect correctly when the session is missing or expired."
+    ],
+    "nice": [
+      "Verify stale sessions do not show the wrong account or access state."
+    ]
+  },
+  "search": {
+    "must": [
+      "Verify search returns expected results for a known keyword.",
+      "Verify selecting a search result opens the correct content or detail page."
+    ],
+    "nice": [
+      "Verify empty-state and no-result messaging still behaves correctly."
+    ]
+  },
+  "form submissions": {
+    "must": [
+      "Verify a normal form submission succeeds when all required fields and a valid Turnstile token are present.",
+      "Verify submission is blocked when the Turnstile challenge is missing or invalid.",
+      "Verify successful submissions still reach the backend or Payload form submission flow correctly."
+    ],
+    "nice": [
+      "Verify the success and failure UI states remain correct after form submission."
+    ]
+  },
+  "navigation": {
+    "must": [
+      "Verify the main navigation paths still open the correct screens or pages."
+    ],
+    "nice": [
+      "Verify back navigation and deep-link style entry points behave correctly."
+    ]
+  },
+  "footer links": {
+    "must": [
+      "Verify footer links and footer utility actions still open the correct destinations."
+    ],
+    "nice": [
+      "Verify footer auth or settings links show the correct state for signed-in and signed-out users."
+    ]
+  },
+  "web smoke flows": {
+    "must": [
+      "Verify the main smoke path still works: home, sign in, open gated content, account, and sign out.",
+      "Verify the app can navigate between key web pages without auth or routing failures."
+    ],
+    "nice": [
+      "Verify one core subscriber journey completes without unexpected prompts or blocking."
+    ]
+  },
+  "video discovery": {
+    "must": [
+      "Verify users can discover content from the affected listing or search entry points."
+    ],
+    "nice": [
+      "Verify promoted or featured content modules still route to the correct detail pages."
+    ]
+  },
+  "image loading": {
+    "must": [
+      "Verify affected images load without broken placeholders, flicker, or obvious fallback text."
+    ],
+    "nice": [
+      "Verify slow-loading states do not briefly show incorrect content."
+    ]
+  },
+  "content presentation": {
+    "must": [
+      "Verify the affected content block renders the correct title, image, and call-to-action state."
+    ],
+    "nice": [
+      "Verify layout and spacing remain correct for the changed content module."
+    ]
+  },
+  "cms content": {
+    "must": [
+      "Verify the affected CMS-driven content appears correctly in the consuming app or page.",
+      "Verify the intended content fields render without missing or malformed data."
+    ],
+    "nice": [
+      "Verify content edits or configuration changes do not break nearby blocks or sections."
+    ]
+  },
+  "content shelves": {
+    "must": [
+      "Verify the affected shelf or grid renders the expected cards and section title.",
+      "Verify clicking a featured card from the affected shelf opens the correct content."
+    ],
+    "nice": [
+      "Verify shelf order, card spacing, and loading state still look correct."
+    ]
+  },
+  "video playback": {
+    "must": [
+      "Verify the affected video opens and starts playback successfully.",
+      "Verify playback controls and loading state behave normally."
+    ],
+    "nice": [
+      "Verify playback access gates remain correct for subscriber and non-subscriber states."
+    ]
+  },
+  "video detail": {
+    "must": [
+      "Verify the video detail page loads the correct metadata and call-to-action state."
+    ],
+    "nice": [
+      "Verify navigation from a listing page to the video detail page still works."
+    ]
+  },
+  "access control": {
+    "must": [
+      "Verify gated content, prompts, and restricted actions match the user’s access level."
+    ],
+    "nice": [
+      "Verify users without access do not reach playback or protected content unexpectedly."
+    ]
+  },
+  "watch history": {
+    "must": [
+      "Verify previously watched content and progress state still behave correctly."
+    ],
+    "nice": [
+      "Verify watch progress updates after a new playback session."
+    ]
+  },
+  "gift flow": {
+    "must": [
+      "Verify the gift purchase or redemption flow completes successfully.",
+      "Verify the gifted content or access state is available to the recipient as expected."
+    ],
+    "nice": [
+      "Verify invalid or reused gift flows show the correct error state."
+    ]
+  },
+  "video access": {
+    "must": [
+      "Verify the recipient or target user can access the expected gifted or unlocked video."
+    ],
+    "nice": [
+      "Verify access is not granted to the wrong user or without redemption."
+    ]
+  },
+  "home": {
+    "must": [
+      "Verify the home page loads the expected key modules without layout or content breakage."
+    ],
+    "nice": [
+      "Verify major homepage links still route to the correct content."
+    ]
+  },
+  "hero banner": {
+    "must": [
+      "Verify the homepage hero banner loads without broken, null, or placeholder-like image text.",
+      "Verify the first hero slide shows the expected image, title, and click target.",
+      "Verify moving between hero slides does not flash incorrect content or alt-text fallbacks."
+    ],
+    "nice": [
+      "Verify the hero banner behaves correctly on both desktop and mobile widths."
+    ]
+  },
+  "live chat": {
+    "must": [
+      "Verify the live chat screen or module loads and shows the expected signed-in state."
+    ],
+    "nice": [
+      "Verify chat entry points and access requirements behave correctly."
+    ]
+  },
+  "chat moderation": {
+    "must": [
+      "Verify moderated chat states or restricted messages behave as expected in the affected flow."
+    ],
+    "nice": [
+      "Verify normal chat behavior still works for allowed content."
+    ]
+  },
+  "live stream": {
+    "must": [
+      "Verify the live stream entry point loads and the player starts correctly.",
+      "Verify the live stream page shows the expected player, banner, and gating state."
+    ],
+    "nice": [
+      "Verify moving between live stream and other content pages works correctly."
+    ]
+  },
+  "watchlist": {
+    "must": [
+      "Verify items can still be added to and viewed from the watchlist."
+    ],
+    "nice": [
+      "Verify removing an item from the watchlist updates the state correctly."
+    ]
+  },
+  "offline mode": {
+    "must": [
+      "Verify offline mode or downloaded content behaves correctly when network access is unavailable."
+    ],
+    "nice": [
+      "Verify returning online restores the expected playback and sync behavior."
+    ]
+  },
+  "downloads": {
+    "must": [
+      "Verify downloaded or locally available content remains accessible in the expected state."
+    ],
+    "nice": [
+      "Verify content unavailable offline shows the correct restriction or fallback state."
+    ]
+  },
+  "analytics tracking": {
+    "must": [
+      "Verify the affected user action still fires the expected analytics or tracking event if this flow is instrumented."
+    ],
+    "nice": [
+      "Verify tracking changes do not block the visible user flow."
+    ]
+  },
+  "content access": {
+    "must": [
+      "Verify the target content is visible and accessible only for the correct user state."
+    ],
+    "nice": [
+      "Verify content gating messages remain accurate."
+    ]
+  }
+}
