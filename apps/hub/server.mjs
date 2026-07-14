@@ -458,32 +458,58 @@ function resolveToolApi(pathname) {
   return { tool: TOOL_BY_SLUG.get(match[1]) || null, action: match[2] };
 }
 
+/**
+ * The tool API as data, so a request that misses can be told *why* it missed:
+ * an endpoint that does not exist reads differently from one that exists but
+ * wants another method — which is what opening a POST route in the browser does.
+ */
+const TOOL_ROUTES = {
+  'pr-tracker': {
+    state: { method: 'GET', run: () => buildPrTrackerState() },
+    sync: { method: 'POST', run: () => runPrTrackerSync() },
+    'update-status': { method: 'POST', run: (req) => updatePrTrackerStatus(req) },
+    'update-priority': { method: 'POST', run: (req) => updatePrTrackerPriority(req) },
+    'update-auto-sync': { method: 'POST', run: (req) => updatePrTrackerAutoSync(req) },
+  },
+  'prod-delivery-summary': {
+    report: { method: 'GET', run: (req, url) => buildProdDeliveryState(url.searchParams) },
+    refresh: { method: 'POST', run: (req) => refreshProdDeliveryReport(req) },
+    'export-markdown': { method: 'POST', run: (req) => exportProdDeliveryMarkdown(req) },
+  },
+  'qa-pr-impact': {
+    analyze: { method: 'POST', run: (req) => analyzeQaPrImpact(req) },
+  },
+  'file-compressor': {},
+};
+
 async function handleToolApi(toolApi, req, url) {
   const { tool, action } = toolApi;
   if (!tool) return null;
 
-  if (tool.id === 'pr-tracker') {
-    if (req.method === 'GET' && action === 'state') return buildPrTrackerState();
-    if (req.method === 'POST' && action === 'sync') return runPrTrackerSync();
-    if (req.method === 'POST' && action === 'update-status') return updatePrTrackerStatus(req);
-    if (req.method === 'POST' && action === 'update-priority') return updatePrTrackerPriority(req);
-    if (req.method === 'POST' && action === 'update-auto-sync') return updatePrTrackerAutoSync(req);
-    return null;
+  const routes = TOOL_ROUTES[tool.id];
+  if (!routes) return null;
+
+  const route = routes[action];
+  if (!route) {
+    const known = Object.keys(routes);
+    const error = new Error(
+      `${tool.title} has no "${action}" endpoint.` +
+        (known.length ? ` It has: ${known.join(', ')}.` : ''),
+    );
+    error.status = 404;
+    throw error;
   }
 
-  if (tool.id === 'prod-delivery-summary') {
-    if (req.method === 'GET' && action === 'report') return buildProdDeliveryState(url.searchParams);
-    if (req.method === 'POST' && action === 'refresh') return refreshProdDeliveryReport(req);
-    if (req.method === 'POST' && action === 'export-markdown') return exportProdDeliveryMarkdown(req);
-    return null;
+  if (req.method !== route.method) {
+    const error = new Error(
+      `This endpoint answers ${route.method}, not ${req.method}. ` +
+        `Opening /api/tools/${tool.slug}/${action} in a browser sends GET; use the ${tool.title} page instead.`,
+    );
+    error.status = 405;
+    throw error;
   }
 
-  if (tool.id === 'qa-pr-impact') {
-    if (req.method === 'POST' && action === 'analyze') return analyzeQaPrImpact(req);
-    return null;
-  }
-
-  return null;
+  return route.run(req, url);
 }
 
 async function analyzeQaPrImpact(req) {
