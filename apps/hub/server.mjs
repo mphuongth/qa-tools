@@ -3,7 +3,7 @@
 import { createServer } from 'node:http';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Readable } from 'node:stream';
@@ -22,6 +22,13 @@ import {
   syncReferenceDescriptionFile,
 } from '../../tools/prod-delivery-summary/index.mjs';
 import { analyzePullRequest } from '../../tools/qa-pr-impact/index.mjs';
+import {
+  compressVideo,
+  detectCapabilities,
+  normalizeTargetMiB,
+  replaceExtension,
+  sanitizeFileName,
+} from '../../tools/file-compressor/index.mjs';
 
 const execFile = promisify(execFileCb);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -472,7 +479,7 @@ async function handleToolApi(toolApi, req, url) {
   }
 
   if (tool.id === 'file-compressor') {
-    if (req.method === 'GET' && action === 'capabilities') return buildFileCompressorCapabilities();
+    if (req.method === 'GET' && action === 'capabilities') return detectCapabilities();
     return null;
   }
 
@@ -1029,29 +1036,12 @@ async function readJsonBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-async function buildFileCompressorCapabilities() {
-  const [ffmpeg, ffprobe] = await Promise.all([isCommandAvailable('ffmpeg'), isCommandAvailable('ffprobe')]);
-  return {
-    ffmpeg,
-    ffprobe,
-    videoTranscoding: ffmpeg && ffprobe,
-  };
-}
-
-async function isCommandAvailable(command) {
-  try {
-    await execFile(command, ['-version'], { timeout: 5_000, maxBuffer: 256 * 1024 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
+/** Bridges the upload to the tool: multipart in, temp files on disk, the encoded file back out. */
 async function compressVideoUpload(req, res) {
   let tempDir = '';
 
   try {
-    const capabilities = await buildFileCompressorCapabilities();
+    const capabilities = await detectCapabilities();
     if (!capabilities.videoTranscoding) {
       return sendJson(res, 400, {
         error: 'Video compression needs ffmpeg and ffprobe installed on this machine.',
@@ -1066,27 +1056,23 @@ async function compressVideoUpload(req, res) {
     }
 
     const targetMiB = normalizeTargetMiB(formData.get('targetMiB'));
-    const targetBytes = targetMiB * 1024 * 1024;
     const originalName = sanitizeFileName(file.name || 'video.mov');
     const outputName = replaceExtension(originalName, '.compressed.mp4');
 
     tempDir = await mkdtemp(path.join(os.tmpdir(), 'file-compressor-'));
     const inputPath = path.join(tempDir, originalName);
-    const outputPath = path.join(tempDir, outputName);
     await writeFile(inputPath, Buffer.from(await file.arrayBuffer()));
 
-    const durationSeconds = await probeVideoDuration(inputPath);
-    const ffmpegArgs = buildVideoCompressionArgs(inputPath, outputPath, targetBytes, durationSeconds);
-    await execFile('ffmpeg', ffmpegArgs, {
-      timeout: 15 * 60 * 1_000,
-      maxBuffer: 20 * 1024 * 1024,
+    const { outputPath, outputBytes, durationSeconds } = await compressVideo({
+      inputPath,
+      outputPath: path.join(tempDir, outputName),
+      targetBytes: targetMiB * 1024 * 1024,
     });
 
-    const [outputBuffer, outputStat] = await Promise.all([readFile(outputPath), stat(outputPath)]);
-    return sendDownload(res, 200, outputBuffer, 'video/mp4', outputName, {
+    return sendDownload(res, 200, await readFile(outputPath), 'video/mp4', outputName, {
       'X-Original-Filename': originalName,
       'X-Output-Filename': outputName,
-      'X-Output-Size': String(outputStat.size),
+      'X-Output-Size': String(outputBytes),
       'X-Video-Duration-Seconds': String(durationSeconds),
       'X-Target-MiB': String(targetMiB),
     });
@@ -1116,75 +1102,6 @@ async function readMultipartFormData(req) {
     duplex: 'half',
   });
   return request.formData();
-}
-
-async function probeVideoDuration(inputPath) {
-  const { stdout } = await execFile(
-    'ffprobe',
-    ['-v', 'error', '-show_entries', 'format=duration', '-of', 'json', inputPath],
-    { timeout: 30_000, maxBuffer: 1024 * 1024 },
-  );
-  const parsed = JSON.parse(stdout || '{}');
-  const duration = Number(parsed?.format?.duration);
-  if (!Number.isFinite(duration) || duration <= 0) {
-    throw new Error('Could not read video duration.');
-  }
-  return duration;
-}
-
-function buildVideoCompressionArgs(inputPath, outputPath, targetBytes, durationSeconds) {
-  const targetBitsPerSecond = Math.max(360_000, Math.floor((targetBytes * 8 * 0.9) / durationSeconds));
-  const audioBitsPerSecond = 96_000;
-  const videoBitsPerSecond = Math.max(250_000, targetBitsPerSecond - audioBitsPerSecond);
-  const maxrate = Math.round(videoBitsPerSecond * 1.45);
-  const bufsize = Math.round(videoBitsPerSecond * 2.8);
-
-  return [
-    '-y',
-    '-i',
-    inputPath,
-    '-map',
-    '0:v:0',
-    '-map',
-    '0:a?',
-    '-vf',
-    "scale='min(1280,iw)':-2",
-    '-c:v',
-    'libx264',
-    '-preset',
-    'veryfast',
-    '-b:v',
-    String(videoBitsPerSecond),
-    '-maxrate',
-    String(maxrate),
-    '-bufsize',
-    String(bufsize),
-    '-pix_fmt',
-    'yuv420p',
-    '-c:a',
-    'aac',
-    '-b:a',
-    '96k',
-    '-movflags',
-    '+faststart',
-    outputPath,
-  ];
-}
-
-function normalizeTargetMiB(value) {
-  const target = Number(value || 25);
-  if (!Number.isFinite(target)) return 25;
-  return Math.min(100, Math.max(1, Math.round(target)));
-}
-
-function sanitizeFileName(fileName) {
-  const baseName = path.basename(String(fileName || 'file')).replace(/[^\w .@()-]/g, '_').trim();
-  return baseName.slice(0, 160) || 'file';
-}
-
-function replaceExtension(fileName, extension) {
-  const parsed = path.parse(sanitizeFileName(fileName));
-  return `${parsed.name || 'file'}${extension}`;
 }
 
 function normalizeEditableStatus(value) {

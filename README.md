@@ -8,7 +8,7 @@ Point it at a repo and it works, with no per-project code changes.
 | [`qa-pr-impact`](tools/qa-pr-impact) | Turns a PR URL into a QA verification plan: areas to test, related regressions, suggested test cases. |
 | [`pr-rollout-tracker`](tools/pr-rollout-tracker) | Syncs a rollout tracker from GitHub and writes a Slack-ready client update. |
 | [`prod-delivery-summary`](tools/prod-delivery-summary) | Reads git history and produces a production delivery report grouped by platform. |
-| `file-compressor` | Browser-only: gzip files, transcode video to MP4, check the result against GitHub's upload limit. |
+| [`file-compressor`](tools/file-compressor) | Transcodes video down to a target size (and gzips other files in the hub), to clear GitHub's upload limit. |
 
 ## Requirements
 
@@ -39,6 +39,9 @@ node tools/pr-rollout-tracker/index.mjs --repo owner/name
 
 # Delivery summary for the last 3 months (clones the repo into a local cache)
 node tools/prod-delivery-summary/index.mjs --repo owner/name --months 3
+
+# Compress a video down to roughly 8 MiB
+node tools/file-compressor/index.mjs demo.mov --target 8
 ```
 
 ## Project profiles
