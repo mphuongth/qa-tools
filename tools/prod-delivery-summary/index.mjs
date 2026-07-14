@@ -142,8 +142,9 @@ const PLATFORM_HIGHLIGHTS_PROMPT = `You group a platform's shipped pull requests
 You are given one plain-English description per PR. Those descriptions are the source of truth. Summarize and group them — do not add facts they do not contain, and do not invent benefits.
 
 Rules:
-- Return the requested number of bullets or fewer, each one sentence, plain English a non-engineer can follow.
-- Group related PRs into a single bullet instead of writing one bullet per PR.
+- Return the requested number of bullets or fewer. Every PR description must be covered by some bullet — do not drop any.
+- Group PRs that are genuinely related into one bullet; keep unrelated work as its own bullet rather than forcing a merge.
+- Each bullet is one sentence, plain English a non-engineer can follow, and at most 300 characters (about 50 words). Write it concise from the start — do not rely on trimming.
 - Lead with the most user-facing or impactful work.
 - Start each bullet with the feature, system, or area — not a verb.
 - No marketing language, no line counts, no file names, no PR numbers, no markdown.
@@ -1468,7 +1469,7 @@ async function buildPlatformHighlights(platform, items) {
 
   if (!descriptions.length) return [];
 
-  // Few enough PRs that each description is itself a highlight; grouping would only lose detail.
+  // 1–3 PRs: each description is itself a highlight; grouping would only lose detail.
   if (descriptions.length <= 3) {
     return descriptions.map((value) => finalizePlatformBullet(value));
   }
@@ -1479,12 +1480,20 @@ async function buildPlatformHighlights(platform, items) {
     if (grouped.length) return grouped;
   }
 
-  // Fallback: list the descriptions verbatim. Plain, but every bullet is a real shipped change.
-  return descriptions.map((value) => finalizePlatformBullet(value)).slice(0, 12);
+  // Fallback with no writer: list every description. Verbose, but nothing is dropped and no
+  // bullet claims anything the descriptions do not already say.
+  return descriptions.map((value) => finalizePlatformBullet(value));
+}
+
+// 4–19 PRs: up to one bullet per PR (cap 8), so only genuinely related work gets grouped.
+// 20+ PRs: 4–8 grouped bullets, fewer as volume grows so the section stays scannable.
+function highlightBulletTarget(count) {
+  if (count < 20) return Math.min(8, Math.max(4, count));
+  return Math.max(4, Math.min(8, Math.round(count / 8)));
 }
 
 async function generatePlatformHighlights(writer, platform, descriptions) {
-  const count = Math.max(3, Math.min(8, Math.round(descriptions.length / 4) + 2));
+  const count = highlightBulletTarget(descriptions.length);
   const prompt = [
     PLATFORM_HIGHLIGHTS_PROMPT,
     '',
@@ -1502,7 +1511,9 @@ async function generatePlatformHighlights(writer, platform, descriptions) {
     .filter((line) => line.startsWith('- '))
     .map((line) => finalizePlatformBullet(line.replace(/^-\s*/, '')))
     .filter(Boolean)
-    .slice(0, count);
+    // count is the instruction to the model; cap at the PR count only as a runaway guard so a
+    // malformed reply can't explode, never tight enough to drop a legitimately grouped bullet.
+    .slice(0, descriptions.length);
 }
 
 function joinPhrases(values) {
