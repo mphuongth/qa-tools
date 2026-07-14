@@ -36,6 +36,11 @@ QA_TOOLS_PORT=4381 pnpm serve
 `prod-delivery-summary` reads git history rather than the API, so the hub clones the selected repo
 into a local cache (`~/.cache/qa-tools`) the first time it runs and refreshes it afterwards.
 
+The PR tracker keeps **one file per repo**, also under that cache —
+`~/.cache/qa-tools/pr-tracker/<owner>-<name>.json` — so switching repos never mixes their PRs, and
+the hub never writes over a tracker some other tool owns. Set `PR_TRACKER_JSON` to pin one location
+instead.
+
 ## CLI
 
 ```bash
