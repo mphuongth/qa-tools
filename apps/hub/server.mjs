@@ -817,7 +817,8 @@ function getNextScheduledDateTime(timezone, time) {
 
 function getTimeZoneParts(date, timezone) {
   const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone: timezone,
+    // An empty string is not a valid time zone; undefined means "use system local".
+    timeZone: timezone || undefined,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
