@@ -3,10 +3,9 @@
 import { createServer } from 'node:http';
 import { execFile as execFileCb } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 
 import { ensureLocalClone, parseRepoRef, resolveProjectConfig } from '../../lib/project-config.mjs';
@@ -22,13 +21,6 @@ import {
   syncReferenceDescriptionFile,
 } from '../../tools/prod-delivery-summary/index.mjs';
 import { analyzePullRequest } from '../../tools/qa-pr-impact/index.mjs';
-import {
-  compressVideo,
-  detectCapabilities,
-  normalizeTargetMiB,
-  replaceExtension,
-  sanitizeFileName,
-} from '../../tools/file-compressor/index.mjs';
 
 const execFile = promisify(execFileCb);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -80,14 +72,6 @@ const TOOL_CONFIG = {
     icon: 'qa-pr-impact',
     needsRepo: false,
   },
-  fileCompressor: {
-    id: 'file-compressor',
-    title: 'File Compressor',
-    description:
-      'Compress local files into gzip archives, transcode videos to MP4, and check whether the result fits GitHub browser upload limits.',
-    icon: 'file-compressor',
-    needsRepo: false,
-  },
 };
 
 const TOOL_DEFINITIONS = [
@@ -110,13 +94,6 @@ const TOOL_DEFINITIONS = [
     slug: 'qa-pr-impact',
     generatedDir: path.join(GENERATED_ROOT, 'qa-pr-impact'),
     htmlPaths: toolHtmlPaths('qa-pr-impact'),
-    command: 'pnpm serve',
-  },
-  {
-    ...TOOL_CONFIG.fileCompressor,
-    slug: 'file-compressor',
-    generatedDir: path.join(GENERATED_ROOT, 'file-compressor'),
-    htmlPaths: toolHtmlPaths('file-compressor'),
     command: 'pnpm serve',
   },
 ];
@@ -191,10 +168,6 @@ async function handleRequest(req, res) {
 
     if (req.method === 'GET' && url.pathname === '/api/reviewers') {
       return sendJson(res, 200, await buildReviewerCandidates());
-    }
-
-    if (toolApi?.tool?.id === 'file-compressor' && req.method === 'POST' && toolApi.action === 'compress-video') {
-      return compressVideoUpload(req, res);
     }
 
     if (toolApi) {
@@ -475,11 +448,6 @@ async function handleToolApi(toolApi, req, url) {
 
   if (tool.id === 'qa-pr-impact') {
     if (req.method === 'POST' && action === 'analyze') return analyzeQaPrImpact(req);
-    return null;
-  }
-
-  if (tool.id === 'file-compressor') {
-    if (req.method === 'GET' && action === 'capabilities') return detectCapabilities();
     return null;
   }
 
@@ -1036,74 +1004,6 @@ async function readJsonBody(req) {
   return raw ? JSON.parse(raw) : {};
 }
 
-/** Bridges the upload to the tool: multipart in, temp files on disk, the encoded file back out. */
-async function compressVideoUpload(req, res) {
-  let tempDir = '';
-
-  try {
-    const capabilities = await detectCapabilities();
-    if (!capabilities.videoTranscoding) {
-      return sendJson(res, 400, {
-        error: 'Video compression needs ffmpeg and ffprobe installed on this machine.',
-        capabilities,
-      });
-    }
-
-    const formData = await readMultipartFormData(req);
-    const file = formData.get('file');
-    if (!file || typeof file.arrayBuffer !== 'function') {
-      return sendJson(res, 400, { error: 'Missing video file.' });
-    }
-
-    const targetMiB = normalizeTargetMiB(formData.get('targetMiB'));
-    const originalName = sanitizeFileName(file.name || 'video.mov');
-    const outputName = replaceExtension(originalName, '.compressed.mp4');
-
-    tempDir = await mkdtemp(path.join(os.tmpdir(), 'file-compressor-'));
-    const inputPath = path.join(tempDir, originalName);
-    await writeFile(inputPath, Buffer.from(await file.arrayBuffer()));
-
-    const { outputPath, outputBytes, durationSeconds } = await compressVideo({
-      inputPath,
-      outputPath: path.join(tempDir, outputName),
-      targetBytes: targetMiB * 1024 * 1024,
-    });
-
-    return sendDownload(res, 200, await readFile(outputPath), 'video/mp4', outputName, {
-      'X-Original-Filename': originalName,
-      'X-Output-Filename': outputName,
-      'X-Output-Size': String(outputBytes),
-      'X-Video-Duration-Seconds': String(durationSeconds),
-      'X-Target-MiB': String(targetMiB),
-    });
-  } catch (error) {
-    return sendJson(res, 500, { error: error.message || 'Video compression failed.' });
-  } finally {
-    if (tempDir) {
-      await rm(tempDir, { recursive: true, force: true }).catch(() => {});
-    }
-  }
-}
-
-async function readMultipartFormData(req) {
-  const headers = new Headers();
-  for (const [key, value] of Object.entries(req.headers)) {
-    if (Array.isArray(value)) {
-      headers.set(key, value.join(', '));
-    } else if (value) {
-      headers.set(key, value);
-    }
-  }
-
-  const request = new Request('http://internal-tools.local/upload', {
-    method: req.method,
-    headers,
-    body: Readable.toWeb(req),
-    duplex: 'half',
-  });
-  return request.formData();
-}
-
 function normalizeEditableStatus(value) {
   const allowed = new Set(['Pending', 'Approved', 'Merged', 'Hold', 'Closed']);
   const normalized = String(value || '').trim();
@@ -1174,17 +1074,6 @@ function send(res, status, body, contentType) {
   res.writeHead(status, {
     'Content-Type': contentType,
     'Cache-Control': 'no-store',
-  });
-  res.end(body);
-}
-
-function sendDownload(res, status, body, contentType, filename, extraHeaders = {}) {
-  res.writeHead(status, {
-    'Content-Type': contentType,
-    'Content-Length': Buffer.byteLength(body),
-    'Content-Disposition': `attachment; filename="${filename.replaceAll('"', '')}"`,
-    'Cache-Control': 'no-store',
-    ...extraHeaders,
   });
   res.end(body);
 }
