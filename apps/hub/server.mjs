@@ -35,8 +35,25 @@ const GENERATED_ROOT = path.join(APP_DIR, '.generated');
 const LANDING_HTML_PATHS = [path.join(APP_DIR, 'landing.html')];
 /** One stylesheet for every page, so the hub and its tools stay one system. */
 const CONSOLE_CSS_PATH = path.join(APP_DIR, 'assets', 'console.css');
+const CACHE_ROOT = process.env.QA_TOOLS_CACHE_DIR || path.join(os.homedir(), '.cache', 'qa-tools');
+const TRACKER_DIR = path.join(CACHE_ROOT, 'pr-tracker');
 const SERVER_ERROR_LOG = path.join(GENERATED_ROOT, 'server-error.log');
 const HUB_SETTINGS_PATH = path.join(GENERATED_ROOT, 'hub-settings.json');
+
+/**
+ * One tracker file per repo, under this hub's own cache.
+ *
+ * It used to be a single ~/Downloads/pr-tracker-backup.json — the same path the
+ * in-repo tool this was extracted from still writes to, so the two clobbered each
+ * other, and two different repos landed in one file. PR_TRACKER_JSON still wins
+ * for anyone who wants to pin the location.
+ */
+function trackerPathFor(repoSlug) {
+  if (process.env.PR_TRACKER_JSON) return process.env.PR_TRACKER_JSON;
+  const [owner, name] = String(repoSlug || '').split('/');
+  if (!owner || !name) throw new Error('No repo selected, so there is no tracker to read.');
+  return path.join(TRACKER_DIR, `${owner}-${name}.json`);
+}
 
 /**
  * The repo every tool runs against. Set from the UI and persisted, so the hub is
@@ -60,7 +77,6 @@ const TOOL_CONFIG = {
     description:
       'Refresh GitHub rollout state, manage your PR list, and generate the client message from selected PRs.',
     icon: 'pr-tracker',
-    trackerJson: process.env.PR_TRACKER_JSON || path.join(os.homedir(), 'Downloads', 'pr-tracker-backup.json'),
     needsRepo: true,
     produces: 'Slack update',
   },
@@ -685,10 +701,10 @@ function missingApprovers(pr, requiredApprovers) {
 }
 
 async function buildPrTrackerState() {
-  const tool = TOOL_BY_ID.get('pr-tracker');
   const config = await activeProjectConfig();
   const requiredApprovers = activeRequiredApprovers(config);
-  const tracker = await loadTrackerJson(tool.trackerJson);
+  const trackerPath = trackerPathFor(config.repo);
+  const tracker = await loadTrackerJson(trackerPath);
   const cachedState = await readJsonIfExists(PR_TRACKER_STATE_PATH);
   const excludeMergedPrNumsOnProd = new Set(cachedState?.excludeMergedPrNumsOnProd || []);
   const boardTracker = tracker.filter(
@@ -715,7 +731,7 @@ async function buildPrTrackerState() {
 
   return {
     repo: config.repo,
-    trackerPath: tool.trackerJson,
+    trackerPath,
     reportTimeZone: hubSettings.timezone,
     autoSync: {
       enabled: prTrackerAutoSyncState.enabled,
@@ -764,7 +780,8 @@ async function updatePrTrackerStatus(req) {
     throw new Error('Invalid status');
   }
 
-  const tracker = await loadTrackerJson(config.trackerJson);
+  const trackerPath = trackerPathFor(hubSettings.repo);
+  const tracker = await loadTrackerJson(trackerPath);
   const index = tracker.findIndex((pr) => String(pr.num) === num);
   if (index === -1) {
     throw new Error(`PR #${num} not found in tracker`);
@@ -777,7 +794,8 @@ async function updatePrTrackerStatus(req) {
     techAppr: status === 'Approved' || status === 'Merged',
   };
 
-  await writeFile(config.trackerJson, `${JSON.stringify(tracker, null, 2)}\n`, 'utf8');
+  await mkdir(path.dirname(trackerPath), { recursive: true });
+  await writeFile(trackerPath, `${JSON.stringify(tracker, null, 2)}\n`, 'utf8');
   return buildPrTrackerState();
 }
 
@@ -795,7 +813,8 @@ async function updatePrTrackerPriority(req) {
     throw new Error('Invalid priority');
   }
 
-  const tracker = await loadTrackerJson(config.trackerJson);
+  const trackerPath = trackerPathFor(hubSettings.repo);
+  const tracker = await loadTrackerJson(trackerPath);
   const index = tracker.findIndex((pr) => String(pr.num) === num);
   if (index === -1) {
     throw new Error(`PR #${num} not found in tracker`);
@@ -806,7 +825,8 @@ async function updatePrTrackerPriority(req) {
     prio,
   };
 
-  await writeFile(config.trackerJson, `${JSON.stringify(tracker, null, 2)}\n`, 'utf8');
+  await mkdir(path.dirname(trackerPath), { recursive: true });
+  await writeFile(trackerPath, `${JSON.stringify(tracker, null, 2)}\n`, 'utf8');
   return buildPrTrackerState();
 }
 
@@ -860,9 +880,10 @@ async function runPrTrackerSyncWithLock(trigger) {
 }
 
 async function runPrTrackerSyncInternal(trigger) {
-  const tool = TOOL_BY_ID.get('pr-tracker');
   const config = await activeProjectConfig();
   const token = await resolveGithubToken();
+  const trackerPath = trackerPathFor(config.repo);
+  await mkdir(path.dirname(trackerPath), { recursive: true });
   const env = {
     ...process.env,
     ...(token ? { GITHUB_TOKEN: token } : {}),
@@ -871,9 +892,9 @@ async function runPrTrackerSyncInternal(trigger) {
   const args = [
     path.join(ROOT_DIR, 'tools', 'pr-rollout-tracker', 'index.mjs'),
     '--input',
-    tool.trackerJson,
+    trackerPath,
     '--output',
-    tool.trackerJson,
+    trackerPath,
     '--message-out',
     PR_TRACKER_MESSAGE_PATH,
     '--state-out',
