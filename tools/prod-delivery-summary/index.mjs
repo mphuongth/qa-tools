@@ -207,14 +207,15 @@ export async function buildProdDeliveryReport({
     const diffPaths = await listDiffPaths(repoPath, item.mergeSha);
     const override = project.prOverrides[String(item.prNumber)] || {};
     const parsedSubject = parsePrSubject(mergeMeta.subject);
+    const title = parsedSubject?.title || derivePrTitle(mergeMeta.body, mergeMeta.ref, item.prNumber);
     const platformChoice = choosePlatform({
       override,
       referencePlatform: referencePlatforms.get(String(item.prNumber)),
       diffPaths,
       ref: mergeMeta.ref,
+      title,
     });
     const platform = platformChoice.platform;
-    const title = parsedSubject?.title || derivePrTitle(mergeMeta.body, mergeMeta.ref, item.prNumber);
     const commitSubjects = await listBranchCommitSubjects(repoPath, item.mergeSha);
     const referenceDescription = referenceDescriptions.get(String(item.prNumber));
 
@@ -911,7 +912,11 @@ function categorizePlatform(diffPaths, ref) {
   return analyzePlatform(diffPaths, ref).platform;
 }
 
-function choosePlatform({ override, referencePlatform, diffPaths, ref }) {
+// Priority: curated override, then a reviewed platform saved in the markdown table, then the
+// file-path/keyword analysis. A specific saved platform is a human decision and must not be
+// overwritten by the algorithm; "Other" is the uncategorized catch-all, not a decision, so it
+// falls through to analysis.
+function choosePlatform({ override, referencePlatform, diffPaths, ref, title }) {
   if (override.platform) {
     return {
       platform: override.platform,
@@ -921,22 +926,26 @@ function choosePlatform({ override, referencePlatform, diffPaths, ref }) {
     };
   }
 
-  const analyzed = analyzePlatform(diffPaths, ref);
-  if (analyzed.platform !== 'Other') return analyzed;
+  const analyzed = analyzePlatform(diffPaths, ref, title);
 
-  if (referencePlatform && platformOrder().includes(referencePlatform)) {
+  if (referencePlatform && referencePlatform !== 'Other' && platformOrder().includes(referencePlatform)) {
+    const disagrees = analyzed.platform !== 'Other' && analyzed.platform !== referencePlatform;
     return {
       platform: referencePlatform,
       source: 'saved reference',
-      reason: 'No stronger file-path signal; reused saved platform.',
-      confidence: 'medium',
+      reason: disagrees
+        ? `Kept reviewed platform "${referencePlatform}"; changed files look like "${analyzed.platform}".`
+        : 'Reviewed platform from the saved reference table.',
+      confidence: 'high',
+      fileHint: disagrees ? analyzed.platform : '',
+      crossPlatform: analyzed.crossPlatform || [],
     };
   }
 
   return analyzed;
 }
 
-function analyzePlatform(diffPaths, ref) {
+function analyzePlatform(diffPaths, ref, title = '') {
   const counts = new Map();
   const evidence = new Map();
   let testOnlyCount = 0;
@@ -966,17 +975,21 @@ function analyzePlatform(diffPaths, ref) {
     }
   }
 
-  const productCounts = [...counts.entries()].filter(([platform]) =>
-    productPlatforms().includes(platform),
-  );
+  const productCounts = [...counts.entries()]
+    .filter(([platform]) => productPlatforms().includes(platform))
+    .sort((a, b) => b[1] - a[1]);
   if (productCounts.length) {
-    const [platform, count] = productCounts.sort((a, b) => b[1] - a[1])[0];
+    const [platform, count] = productCounts[0];
+    const crossPlatform = productCounts.length > 1 ? productCounts.map(([name]) => name) : [];
     return {
       platform,
       source: 'file paths',
-      reason: `Product files beat test files; ${count} ${platform} path${count === 1 ? '' : 's'} matched.`,
+      reason: crossPlatform.length
+        ? `Multiple product platforms touched (${crossPlatform.join(', ')}); "${platform}" has the most files (${count}).`
+        : `Product files beat test files; ${count} ${platform} path${count === 1 ? '' : 's'} matched.`,
       confidence: e2eCount || testOnlyCount ? 'medium' : 'high',
       evidence: evidence.get(platform) || [],
+      crossPlatform,
     };
   }
 
@@ -1022,12 +1035,12 @@ function analyzePlatform(diffPaths, ref) {
     };
   }
 
-  const textPlatform = inferPlatformFromText(ref);
+  const textPlatform = inferPlatformFromText(`${ref} ${title}`);
   if (textPlatform) {
     return {
       platform: textPlatform,
-      source: 'branch text',
-      reason: `No path match; inferred from source ref "${ref}".`,
+      source: 'title/branch text',
+      reason: `No product-file signal; inferred "${textPlatform}" from the title and branch.`,
       confidence: 'low',
       evidence: [],
     };
@@ -1078,8 +1091,17 @@ function buildReviewWarnings({
   if (platformChoice.confidence === 'low') {
     warnings.push(`Platform is low confidence: ${platformChoice.reason}`);
   }
-  if (referencePlatform && referencePlatform !== platformChoice.platform && !override.platform) {
-    warnings.push(`Saved platform "${referencePlatform}" disagrees with computed platform "${platformChoice.platform}".`);
+  if (platformChoice.fileHint) {
+    warnings.push(`Kept saved platform "${platformChoice.platform}", but changed files look like "${platformChoice.fileHint}"; verify.`);
+  }
+  if (platformChoice.crossPlatform && platformChoice.crossPlatform.length > 1) {
+    warnings.push(`PR spans multiple product platforms (${platformChoice.crossPlatform.join(', ')}); primary chosen by file count.`);
+  }
+  // A specific saved platform wins outright, so a leftover disagreement here means the saved value
+  // is malformed (not in the known set) and was skipped.
+  if (referencePlatform && referencePlatform !== 'Other' && referencePlatform !== platformChoice.platform
+    && !override.platform && !platformOrder().includes(referencePlatform)) {
+    warnings.push(`Saved platform "${referencePlatform}" is not a known platform; used "${platformChoice.platform}" instead.`);
   }
   if (descriptionChoice.confidence === 'low') {
     warnings.push(`Description is low confidence from ${descriptionChoice.source}.`);
