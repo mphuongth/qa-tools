@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Production Delivery Summary</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#faf7f2;--page:#faf7f2;--paper-warm:#f3ede2;--ink:#1a1815;--muted:#4a453e;--faint:#8a8278;--rule:#d4c9b2;--white:#fffdf9;--panel:#f3ede2;--shadow:0 6px 24px rgba(60,40,20,.12);--accent:#b8462f}
+body{background:
+  radial-gradient(ellipse at top left, rgba(184,70,47,.08), transparent 45%),
+  radial-gradient(ellipse at bottom right, rgba(74,103,65,.06), transparent 48%),
+  var(--bg);
+color:var(--ink);font-family:Manrope,-apple-system,sans-serif;font-size:18px;line-height:1.7;margin:0}
+body::before{content:"";position:fixed;inset:0;background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='200' height='200' filter='url(%23n)' opacity='0.035'/></svg>");pointer-events:none}
+.topnav{padding:18px 56px 0}
+.home-link{display:inline-flex;align-items:center;gap:8px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-decoration:none}
+.home-link:hover{color:var(--ink)}
+.hdr{border-bottom:1px solid var(--rule);padding:56px 56px 36px;background:rgba(250,247,242,.72);backdrop-filter:blur(10px)}
+.lbl{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin-bottom:14px}
+.title{font-family:Fraunces,Georgia,serif;font-size:clamp(42px,6vw,72px);font-weight:600;line-height:.98;letter-spacing:-.025em;margin-bottom:22px;max-width:620px}
+.meta{display:flex;gap:36px;flex-wrap:wrap}
+.mi{display:flex;flex-direction:column;gap:4px;min-width:140px}
+.ml{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.mv{font-size:18px;font-weight:500}
+.toolbar{margin:26px 56px 0;padding:22px 24px;background:rgba(250,247,242,.78);border:1px solid var(--rule);border-radius:3px;box-shadow:0 1px 0 rgba(60,40,20,.08)}
+.toolrow{display:flex;gap:16px;flex-wrap:wrap;align-items:center}
+.reportlabel{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.windowchips{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.wchip{padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;border:1px solid var(--rule);border-radius:2px;background:var(--paper-warm);color:var(--muted);cursor:pointer;transition:all .15s}
+.wchip:hover{border-color:#BDAEA0;color:var(--ink);background:var(--white)}
+.wchip.active{background:var(--ink);color:var(--white);border-color:var(--ink);box-shadow:0 8px 18px rgba(32,26,23,.14)}
+.customrange{display:none;gap:10px;flex-wrap:wrap;align-items:center}
+.customrange.active{display:flex}
+.customrange input{padding:10px 14px;border:1px solid var(--rule);border-radius:2px;background:var(--paper-warm);color:var(--ink);font-family:Manrope,sans-serif;font-size:14px;outline:none;min-width:152px}
+.customrange input:focus{border-color:#BDAEA0;box-shadow:0 0 0 4px rgba(189,174,160,.18)}
+.customrange .sep{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint)}
+.acts{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-left:auto}
+.btn{padding:11px 17px;font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;border-radius:2px;border:1px solid var(--ink);background:var(--ink);color:var(--white);cursor:pointer}
+.btn.secondary{background:transparent;color:var(--ink);border-color:var(--rule);box-shadow:none}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.inline-actions{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-bottom:14px}
+.section-note{font-family:'JetBrains Mono',monospace;font-size:11px;letter-spacing:.06em;color:var(--faint)}
+.hint{width:100%;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.05em;color:var(--faint)}
+.hint.hidden{display:none}
+.tabs{display:flex;gap:4px;padding:18px 56px 0;background:transparent;position:sticky;top:0;z-index:10}
+.tb{padding:12px 18px;font-family:Manrope,sans-serif;font-size:14px;font-weight:600;color:var(--muted);background:var(--paper-warm);border:1px solid var(--rule);border-radius:2px;cursor:pointer;transition:color .15s,border-color .15s,background .15s,transform .15s}
+.tb:hover{color:var(--ink)}
+.tb.active{color:var(--white);background:var(--ink);border-color:var(--ink);transform:translateY(-1px)}
+.panel{display:none;padding:28px 56px 100px}
+.panel.active{display:block}
+.tgrid{display:grid;grid-template-columns:repeat(8,1fr);gap:16px;margin-bottom:44px}
+.tc{background:rgba(250,247,242,.78);padding:18px 16px;text-align:left;border:1px solid var(--rule);border-radius:3px;box-shadow:0 1px 0 rgba(60,40,20,.08)}
+.tn{font-family:Fraunces,Georgia,serif;font-size:34px;display:block;line-height:1;margin-bottom:8px}
+.tname{font-size:12px;font-weight:500;color:var(--muted);letter-spacing:.04em}
+.tbar{height:4px;margin-top:14px;border-radius:999px}
+.plat{margin-bottom:34px;padding:28px 28px 26px;background:rgba(250,247,242,.78);border:1px solid var(--rule);border-radius:3px;box-shadow:0 1px 0 rgba(60,40,20,.08)}
+.ph{display:flex;align-items:baseline;gap:16px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid rgba(227,216,204,.92)}
+.pname{font-family:Fraunces,Georgia,serif;font-size:32px}
+.pcnt{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--faint);letter-spacing:.05em}
+ul.bul{list-style:none;display:flex;flex-direction:column;gap:12px}
+ul.bul li{display:grid;grid-template-columns:20px 1fr;gap:10px;font-size:17px;line-height:1.65;color:#2C2825}
+ul.bul li::before{content:"—";color:var(--faint);font-weight:300}
+.web{--a:#2563EB;--l:#EFF6FF}.mobile{--a:#16A34A;--l:#F0FDF4}.payload{--a:#D97706;--l:#FFFBEB}.tv{--a:#0891B2;--l:#ECFEFF}.deploy{--a:#DC2626;--l:#FEF2F2}.e2e{--a:#7C3AED;--l:#F5F3FF}.unit-test{--a:#6D28D9;--l:#F5F3FF}.other{--a:#9D174D;--l:#FDF2F8}
+.tbar{background:var(--a,#ccc)}.pname{color:var(--a)}
+.ctrl{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin-bottom:22px;padding:20px;background:rgba(255,253,249,.86);border:1px solid rgba(227,216,204,.95);border-radius:20px;box-shadow:var(--shadow)}
+.srch{flex:1;min-width:220px;padding:12px 16px;font-family:'DM Sans',sans-serif;font-size:15px;border:1px solid var(--rule);border-radius:12px;background:var(--white);color:var(--ink);outline:none}
+.srch:focus{border-color:#BDAEA0;box-shadow:0 0 0 4px rgba(189,174,160,.18)}
+.fbts{display:flex;gap:6px;flex-wrap:wrap}
+.fb{padding:7px 14px;font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--rule);border-radius:20px;background:rgba(255,255,255,.72);color:var(--muted);cursor:pointer;transition:all .15s}
+.fb:hover{border-color:#BDAEA0;color:var(--ink)}
+.fb.active{background:var(--ink);color:var(--white);border-color:var(--ink)}
+.pcl{font-family:'DM Mono',monospace;font-size:12px;color:var(--faint);margin-bottom:16px}
+table.prt{width:100%;border-collapse:separate;border-spacing:0;background:rgba(255,253,249,.9);border:1px solid rgba(227,216,204,.95);border-radius:24px;box-shadow:var(--shadow)}
+table.prt thead th{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);text-align:left;padding:14px 16px;border-bottom:1px solid rgba(227,216,204,.92);background:#F7F0E7;position:static}
+table.prt tbody tr{border-bottom:1px solid var(--rule);transition:background .1s}
+table.prt tbody tr:hover{background:rgba(250,245,238,.8)}
+table.prt tbody td{padding:11px 14px;font-size:15px;vertical-align:middle}
+.tdesc{color:var(--muted);font-size:14px;max-width:420px}
+.dmeta{margin-top:6px;font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.04em;color:var(--faint);text-transform:uppercase}
+.dwarn{margin-top:6px;padding:7px 9px;border:1px solid #F6C453;background:#FFF8E1;color:#7A4B00;border-radius:10px;font-size:12px;line-height:1.45}
+.tpr a{color:var(--muted);text-decoration:none;font-family:'DM Mono',monospace;font-size:13px}
+.tpr a:hover{color:var(--ink);text-decoration:underline}
+.tpr{font-family:'DM Mono',monospace;font-size:13px;color:var(--faint);white-space:nowrap}
+.ttitle{color:var(--ink)}
+.tplat span{font-family:'DM Mono',monospace;font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:3px 10px;border-radius:20px;font-weight:500;white-space:nowrap}
+.bWeb{background:#EFF6FF;color:#2563EB}.bMobile{background:#F0FDF4;color:#16A34A}.bPayload{background:#FFFBEB;color:#D97706}.bTV{background:#ECFEFF;color:#0891B2}.bDeployment{background:#FEF2F2;color:#DC2626}.bE2E{background:#F5F3FF;color:#7C3AED}.bUnit-test{background:#F5F3FF;color:#6D28D9}.bOther{background:#FDF2F8;color:#9D174D}
+.nores{text-align:center;padding:60px 20px;color:var(--faint);font-family:'DM Mono',monospace;font-size:13px;letter-spacing:.06em}
+.footer{margin-top:50px;padding-top:24px;border-top:1px solid rgba(227,216,204,.92);font-family:'DM Mono',monospace;font-size:11px;color:var(--faint);letter-spacing:.06em}
+.empty-note{font-family:'DM Mono',monospace;font-size:12px;letter-spacing:.05em;color:var(--faint)}
+pre.md{background:#211A17;color:#F5EEE6;padding:24px;border-radius:24px;overflow:auto;font-size:13px;line-height:1.6;max-height:70vh;white-space:pre-wrap;box-shadow:var(--shadow)}
+pre.slack{background:rgba(255,253,249,.9);color:var(--ink);border:1px solid rgba(227,216,204,.95);padding:24px;border-radius:24px;overflow:auto;font-size:15px;line-height:1.65;max-height:70vh;white-space:pre-wrap;box-shadow:var(--shadow)}
+@media(max-width:860px){
+  .toolbar{margin-left:20px;margin-right:20px}
+  .acts{margin-left:0}
+}
+@media(max-width:640px){
+  .topnav{padding:18px 20px 0}
+  .hdr,.panel{padding-left:20px;padding-right:20px}
+  .tabs{padding:18px 20px 0}
+  .toolbar{margin-left:20px;margin-right:20px;padding-left:18px;padding-right:18px}
+  .tgrid{grid-template-columns:repeat(4,1fr)}
+  .title{font-size:32px}
+  .ctrl{flex-direction:column;align-items:stretch}
+  .srch{width:100%;min-width:unset}
+  table.prt thead{display:none}
+  table.prt tbody tr{display:flex;flex-direction:column;padding:14px 0;border-bottom:1px solid var(--rule)}
+  table.prt tbody td{padding:2px 0;border:none}
+  table.prt tbody td.tdate{font-size:12px;color:var(--faint);order:-1}
+  table.prt tbody td.tpr{font-size:14px;font-weight:600;color:var(--ink)}
+  table.prt tbody td.tdesc{font-size:13px;color:var(--muted)}
+  table.prt tbody td.tplat{margin-top:4px}
+}
+</style>
+</head>
+<body>
+<div class="topnav">
+  <a class="home-link" href="/">← Home</a>
+</div>
+<header class="hdr">
+  <div class="lbl">Client Delivery Report</div>
+  <h1 class="title">Production<br>Delivery Summary</h1>
+  <div class="meta">
+    <div class="mi"><span class="ml">Period</span><span class="mv" id="hero-period">Not selected</span></div>
+    <div class="mi"><span class="ml">Total PRs Merged</span><span class="mv" id="hero-total">0</span></div>
+    <div class="mi"><span class="ml">Platforms</span><span class="mv" id="hero-platforms">0</span></div>
+  </div>
+</header>
+
+<section class="toolbar">
+  <div class="toolrow">
+    <div class="reportlabel">Report Window</div>
+    <div class="windowchips">
+      <button class="wchip" id="chip-release" onclick="setMode('latest-release')">Latest Release</button>
+      <button class="wchip" id="chip-today" onclick="setMode('today-release')">Today Release</button>
+      <button class="wchip" id="chip-3" onclick="setPresetMonths(3)">3 Months</button>
+      <button class="wchip" id="chip-6" onclick="setPresetMonths(6)">6 Months</button>
+      <button class="wchip" id="chip-12" onclick="setPresetMonths(12)">12 Months</button>
+      <button class="wchip" id="chip-custom" onclick="setMode('custom')">Custom</button>
+    </div>
+    <div class="customrange" id="custom-range">
+      <input id="start-month" type="month" aria-label="Start month" onchange="handleCustomMonthChange()" onfocus="setMode('custom')">
+      <span class="sep">to</span>
+      <input id="end-month" type="month" aria-label="End month" onchange="handleCustomMonthChange()" onfocus="setMode('custom')">
+    </div>
+    <div class="acts">
+      <button class="btn" id="generate-btn" onclick="loadReport()" disabled>Generate Report</button>
+      <button class="btn secondary" id="markdown-btn" onclick="exportMarkdown()" disabled>Generate Markdown</button>
+    </div>
+  </div>
+  <div class="hint hidden" id="status"></div>
+</section>
+
+<nav class="tabs">
+  <button class="tb active" onclick="switchTab('summary',this)">Summary</button>
+  <button class="tb" onclick="switchTab('prlist',this)">PR List</button>
+  <button class="tb" onclick="switchTab('markdown',this)">Markdown</button>
+  <button class="tb" onclick="switchTab('slack',this)">Slack</button>
+</nav>
+
+<div id="tab-summary" class="panel active">
+  <div class="tgrid" id="count-grid"></div>
+  <div id="group-list" class="empty-note">No report loaded yet.</div>
+  <footer class="footer" id="summary-footer">Generated · not yet run</footer>
+</div>
+
+<div id="tab-prlist" class="panel">
+  <div class="ctrl">
+    <input class="srch" type="text" placeholder="Search by title, description, PR #, or date…" id="si" oninput="renderList()">
+    <div class="fbts" id="filter-buttons">
+      <button class="fb active" onclick="setFilter('All',this)">All</button>
+      <button class="fb" onclick="setFilter('Web',this)">Web</button>
+      <button class="fb" onclick="setFilter('Mobile',this)">Mobile</button>
+      <button class="fb" onclick="setFilter('Payload',this)">Payload</button>
+      <button class="fb" onclick="setFilter('TV',this)">TV</button>
+      <button class="fb" onclick="setFilter('Deployment',this)">Deployment</button>
+      <button class="fb" onclick="setFilter('E2E',this)">E2E</button>
+      <button class="fb" onclick="setFilter('Unit-test',this)">Unit-test</button>
+      <button class="fb" onclick="setFilter('Other',this)">Other</button>
+    </div>
+  </div>
+  <div class="pcl" id="pcl">No report loaded yet.</div>
+  <table class="prt">
+    <thead><tr><th>Date</th><th>PR #</th><th>Title</th><th>Description</th><th>Platform</th></tr></thead>
+    <tbody id="ptb"></tbody>
+  </table>
+  <div class="nores" id="nores" style="display:none">No PRs match your search.</div>
+</div>
+
+<div id="tab-markdown" class="panel">
+  <pre class="md" id="markdown-box">Select a period, then click "Generate Report" to generate the summary.</pre>
+</div>
+
+<div id="tab-slack" class="panel">
+  <div class="inline-actions">
+    <div class="section-note">Plain text summary for Slack</div>
+    <button class="btn secondary" id="copy-slack-btn" onclick="copySlackMessage()" disabled>Copy Slack Message</button>
+  </div>
+  <pre class="slack" id="slack-box">Select a period, then click "Generate Report" to generate the Slack summary.</pre>
+</div>
+
+<script>
+let mode='preset';
+let activeFilter='All';
+let state=null;
+let selectedMonths='';
+const PLATFORM_CLASSES={'Web':'web','Mobile':'mobile','Payload':'payload','TV':'tv','Deployment':'deploy','E2E':'e2e','Unit-test':'unit-test','Other':'other'};
+function setMode(nextMode){
+  mode=nextMode;
+  updateWindowChips();
+  syncActions();
+}
+
+function setPresetMonths(months){
+  selectedMonths=String(months);
+  mode='preset';
+  updateWindowChips();
+  syncActions();
+}
+
+function updateWindowChips(){
+  document.querySelectorAll('.wchip').forEach(btn=>btn.classList.remove('active'));
+  if(mode==='custom'){
+    document.getElementById('chip-custom').classList.add('active');
+  }else if(mode==='latest-release'){
+    document.getElementById('chip-release').classList.add('active');
+  }else if(mode==='today-release'){
+    document.getElementById('chip-today').classList.add('active');
+  }else if(selectedMonths){
+    const chip=document.getElementById('chip-'+selectedMonths);
+    if(chip) chip.classList.add('active');
+  }
+  document.getElementById('custom-range').classList.toggle('active',mode==='custom');
+}
+
+function handleCustomMonthChange(){
+  mode='custom';
+  updateWindowChips();
+  syncActions();
+}
+
+function switchTab(id,btn){
+  document.querySelectorAll('.panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tb').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  btn.classList.add('active');
+}
+
+function setFilter(name,btn){
+  activeFilter=name;
+  document.querySelectorAll('.fb').forEach(b=>b.classList.remove('active'));
+  btn.classList.add('active');
+  renderList();
+}
+
+function hasValidSelection(){
+  if(mode==='latest-release'||mode==='today-release'){
+    return true;
+  }
+  if(mode==='custom'){
+    const start=document.getElementById('start-month').value;
+    const end=document.getElementById('end-month').value;
+    return Boolean(start&&end&&start<=end);
+  }
+  return Boolean(selectedMonths);
+}
+
+function syncActions(){
+  const valid=hasValidSelection();
+  document.getElementById('generate-btn').disabled=!valid;
+  document.getElementById('markdown-btn').disabled=!valid;
+  document.getElementById('copy-slack-btn').disabled=!state;
+}
+
+function currentPayload(){
+  if(mode==='custom'){
+    return {mode:'custom',startMonth:document.getElementById('start-month').value,endMonth:document.getElementById('end-month').value};
+  }
+  if(mode==='latest-release'){
+    return {mode:'latest-release'};
+  }
+  if(mode==='today-release'){
+    return {mode:'today-release'};
+  }
+  return {mode:'preset',months:selectedMonths};
+}
+
+async function loadReport(){
+  if(!hasValidSelection()){
+    setStatus(mode==='custom'?'Select both start and end month first.':'Select a reporting window first.');
+    return;
+  }
+  setStatus('Loading report…');
+  const response=await fetch('/api/tools/prod-delivery-summary/refresh',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(currentPayload())});
+  const payload=await response.json();
+  if(!response.ok) throw new Error(payload.error||'Failed to load report');
+  state=payload;
+  renderAll();
+  if(payload.sync?.updated){
+    setStatus(`Report refreshed. Added ${payload.sync.appendedPrNumbers.length} new PR${payload.sync.appendedPrNumbers.length===1?'':'s'} to the source markdown.`);
+  }else{
+    setStatus(`Report refreshed for ${formatRangeLabel(payload.range)} · ${payload.totalPrs} PRs.`);
+  }
+}
+
+async function exportMarkdown(){
+  if(!hasValidSelection()){
+    setStatus(mode==='custom'?'Select both start and end month first.':'Select a reporting window first.');
+    return;
+  }
+  setStatus('Generating markdown file…');
+  const response=await fetch('/api/tools/prod-delivery-summary/export-markdown',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(currentPayload())});
+  const payload=await response.json();
+  if(!response.ok) throw new Error(payload.error||'Failed to export markdown');
+  state=payload;
+  renderAll();
+  setStatus(`Markdown saved · ${payload.outputPath}`);
+}
+
+function renderAll(){
+  if(!state) return;
+  document.getElementById('hero-period').textContent=formatRangeLabel(state.range);
+  document.getElementById('hero-total').textContent=String(state.totalPrs||0);
+  document.getElementById('hero-platforms').textContent=String(Object.values(state.counts||{}).filter(n=>n>0).length);
+  document.getElementById('markdown-box').textContent=state.markdown||'';
+  document.getElementById('slack-box').textContent=buildSlackMessage(state);
+  document.getElementById('summary-footer').textContent=`Generated · ${new Date(state.generatedAt).toLocaleString()} · ${state.totalPrs} PRs · ${formatRangeLabel(state.range)}`;
+  document.getElementById('copy-slack-btn').disabled=false;
+  renderCounts();
+  renderGroups();
+  renderList();
+}
+
+function buildSlackMessage(report){
+  const title=report?.range?.type==='today-release'?'Summary for today release:':`Summary for ${formatRangeLabel(report.range)}:`;
+  const groups=(report?.platformGroups||[]).filter(group=>group.count>0&&(group.highlights||[]).length);
+  if(!groups.length) return `${title}\nNo PRs were included in this report.`;
+  return [
+    title,
+    ...groups.flatMap((group,index)=>[
+      `${index+1}. ${group.platform}:`,
+      ...(group.highlights||[]).map((item,itemIndex)=>`   ${letterForIndex(itemIndex)}. ${item}`)
+    ])
+  ].join('\n');
+}
+
+function letterForIndex(index){
+  return String.fromCharCode(97+index);
+}
+
+async function copySlackMessage(){
+  const message=document.getElementById('slack-box').textContent;
+  if(!message||!state){
+    setStatus('Generate a report before copying Slack message.');
+    return;
+  }
+  try{
+    await navigator.clipboard.writeText(message);
+    setStatus('Slack message copied to clipboard.');
+  }catch{
+    const box=document.getElementById('slack-box');
+    const selection=window.getSelection();
+    const range=document.createRange();
+    range.selectNodeContents(box);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    setStatus('Clipboard access was blocked. Slack message is selected for manual copy.');
+  }
+}
+
+function renderCounts(){
+  const container=document.getElementById('count-grid');
+  if(!state){
+    container.innerHTML='';
+    return;
+  }
+  const entries=Object.entries(state.counts||{}).filter(([,count])=>count>0);
+  const max=Math.max(...entries.map(([,count])=>count),1);
+  container.innerHTML=entries.map(([platform,count])=>{
+    const cls=PLATFORM_CLASSES[platform]||'other';
+    const width=Math.max(6,Math.round((count/max)*100));
+    return `<div class="tc ${cls}"><span class="tn">${count}</span><span class="tname">${escapeHtml(platform)}</span><div class="tbar" style="width:${width}%"></div></div>`;
+  }).join('');
+}
+
+function renderGroups(){
+  const container=document.getElementById('group-list');
+  if(!state){
+    container.innerHTML='<div class="empty-note">No report loaded yet.</div>';
+    return;
+  }
+  container.innerHTML=(state.platformGroups||[]).map(group=>{
+    const cls=PLATFORM_CLASSES[group.platform]||'other';
+    const countLabel=`${group.count} PR${group.count===1?'':'s'}`;
+    return `<section class="plat ${cls}">
+      <div class="ph"><h2 class="pname">${escapeHtml(group.platform)}</h2><span class="pcnt">${escapeHtml(countLabel)}</span></div>
+      <ul class="bul">${(group.highlights||[]).map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul>
+    </section>`;
+  }).join('') || '<div class="empty-note">No report loaded yet.</div>';
+}
+
+function renderList(){
+  const meta=document.getElementById('pcl');
+  const body=document.getElementById('ptb');
+  const nores=document.getElementById('nores');
+  if(!state){
+    meta.textContent='No report loaded yet.';
+    body.innerHTML='';
+    nores.style.display='none';
+    return;
+  }
+  const q=document.getElementById('si').value.toLowerCase().trim();
+  const rows=(state.prs||[]).filter(r=>(activeFilter==='All'||r.platform===activeFilter)&&(!q||[r.title,r.description,r.prNumber,r.date,r.platform,(r.reviewWarnings||[]).join(' ')].join(' ').toLowerCase().includes(q)));
+  meta.textContent=`Showing ${rows.length} of ${(state.prs||[]).length} PRs`;
+  if(!rows.length){
+    body.innerHTML='';
+    nores.style.display='block';
+    return;
+  }
+  nores.style.display='none';
+  body.innerHTML=rows.map(r=>`<tr>
+    <td class="tdate">${escapeHtml(r.date)}</td>
+    <td class="tpr"><a href="${escapeHtml(r.prUrl)}" target="_blank" rel="noreferrer">#${escapeHtml(r.prNumber)}</a></td>
+    <td class="ttitle">${escapeHtml(r.title)}</td>
+    <td class="tdesc">
+      <div>${escapeHtml(r.description)}</div>
+      <div class="dmeta">${escapeHtml(r.descriptionSource||'unknown')} · ${escapeHtml(r.descriptionConfidence||'unknown')} · ${escapeHtml(r.platformSource||'platform')}</div>
+      ${(r.reviewWarnings||[]).length?`<div class="dwarn">${escapeHtml((r.reviewWarnings||[]).join(' '))}</div>`:''}
+    </td>
+    <td class="tplat"><span class="b${escapeHtml(r.platform)}">${escapeHtml(r.platform)}</span></td>
+  </tr>`).join('');
+}
+
+function formatRangeLabel(range){
+  return range&&range.label?range.label.replace(' - ',' – '):'Not selected';
+}
+
+function setStatus(message){
+  const status=document.getElementById('status');
+  if(!message){
+    status.textContent='';
+    status.classList.add('hidden');
+    return;
+  }
+  status.textContent=message;
+  status.classList.remove('hidden');
+}
+
+function escapeHtml(value){
+  return String(value)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+
+syncActions();
+</script>
+</body>
+</html>

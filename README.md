@@ -1,20 +1,34 @@
 # QA Tools
 
-Three CLI tools for QA and release reporting on **any GitHub repo**. Point them at a repo with
-`--repo owner/name` (or a GitHub URL) and they work — no per-project code changes.
+QA and release tooling that runs against **any GitHub repo** — as a local web hub or as CLIs.
+Point it at a repo and it works, with no per-project code changes.
 
 | Tool | What it does |
 | --- | --- |
 | [`qa-pr-impact`](tools/qa-pr-impact) | Turns a PR URL into a QA verification plan: areas to test, related regressions, suggested test cases. |
 | [`pr-rollout-tracker`](tools/pr-rollout-tracker) | Syncs a rollout tracker from GitHub and writes a Slack-ready client update. |
 | [`prod-delivery-summary`](tools/prod-delivery-summary) | Reads git history and produces a production delivery report grouped by platform. |
+| `file-compressor` | Browser-only: gzip files, transcode video to MP4, check the result against GitHub's upload limit. |
 
 ## Requirements
 
 - Node.js 18+
 - [`gh`](https://cli.github.com) installed and authenticated (`gh auth login`)
+- `ffmpeg` / `ffprobe`, only for the File Compressor's video transcoding
 
-## Quick start
+## The hub
+
+```bash
+pnpm serve   # http://127.0.0.1:4311
+```
+
+Enter a GitHub repo (`owner/name` or a full URL) in the box at the top of the page and every tool
+follows it. The choice is saved, so it survives a restart, and can be changed at any time.
+
+`prod-delivery-summary` reads git history rather than the API, so the hub clones the selected repo
+into a local cache (`~/.cache/qa-tools`) the first time it runs and refreshes it afterwards.
+
+## CLI
 
 ```bash
 # QA plan for a pull request — repo comes from the URL, nothing to configure

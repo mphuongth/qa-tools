@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Repo-agnostic QA tooling: PR rollout tracking, QA impact analysis, and production delivery summaries for any GitHub repo.",
   "scripts": {
+    "serve": "node apps/hub/server.mjs",
     "pr-tracker": "node tools/pr-rollout-tracker/index.mjs",
     "pr-tracker:verify": "node tools/pr-rollout-tracker/verify-slack-format.mjs",
     "qa:pr-impact": "node tools/qa-pr-impact/index.mjs",

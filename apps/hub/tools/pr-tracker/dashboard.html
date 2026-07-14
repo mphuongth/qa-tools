@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PR Rollout Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,400&family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #faf7f2;
+      --surface: rgba(250,247,242,.78);
+      --surface2: #f3ede2;
+      --surface3: #ebe3d3;
+      --border: #d4c9b2;
+      --border2: #c9bba2;
+      --accent: #b8462f;
+      --accent-light: #f3ddd8;
+      --text: #1a1815;
+      --text2: #4a453e;
+      --text3: #8a8278;
+      --green: #12a87a; --green-bg: #edfaf5; --green-text: #0d8560; --green-border: #b6edd9;
+      --amber: #c07c10; --amber-bg: #fff8ec; --amber-text: #9a6200; --amber-border: #f0d89a;
+      --red: #d14040; --red-bg: #fff0f0; --red-text: #b03030; --red-border: #f5bcbc;
+      --blue: #2563eb; --blue-bg: #eff6ff; --blue-text: #1d4ed8; --blue-border: #bfdbfe;
+      --gray-bg: #f4f0e8; --gray-text: #6b6156; --gray-border: #d9cfbf;
+      --shadow-sm: 0 1px 0 rgba(60,40,20,.08);
+      --shadow: 0 6px 24px rgba(60,40,20,.12);
+    }
+
+    html, body {
+      min-height: 100vh;
+      font-family: Manrope, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/></filter><rect width='200' height='200' filter='url(%23n)' opacity='0.035'/></svg>");
+      pointer-events: none;
+    }
+
+    .layout { display: flex; min-height: 100vh; }
+
+    .sidebar {
+      width: 240px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .sidebar-logo {
+      padding: 1.75rem 1.5rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo-mark {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 2px;
+      background: var(--accent);
+      margin-bottom: 10px;
+      color: white;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .sidebar-logo h1 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 24px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .sidebar-logo p {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10.5px;
+      color: var(--text3);
+      margin-top: 4px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .nav {
+      padding: 1rem 0.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .nav-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 0 10px;
+      margin: 6px 0 4px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 9px 12px;
+      border-radius: 9px;
+      font-size: 13.5px;
+      font-weight: 500;
+      color: var(--text2);
+      cursor: pointer;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover { background: var(--surface2); color: var(--text); }
+    .nav-item.active { background: var(--accent-light); color: var(--accent); font-weight: 600; }
+    .nav-icon { width: 16px; text-align: center; }
+
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 1rem 0.75rem;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .main {
+      flex: 1;
+      padding: 2.25rem 2.5rem;
+      min-width: 0;
+    }
+
+    .page { display: none; }
+    .page.active { display: block; }
+
+    .page-header {
+      margin-bottom: 1.75rem;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .page-header h2 {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 40px;
+      font-weight: 600;
+      letter-spacing: -0.025em;
+    }
+
+    .page-header p {
+      font-size: 14px;
+      color: var(--text3);
+      margin-top: 6px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 9px 16px;
+      border-radius: 2px;
+      border: 1px solid var(--border2);
+      background: var(--surface);
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      cursor: pointer;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn:hover { background: var(--surface2); }
+    .btn-primary { background: var(--accent); color: white; border-color: var(--accent); }
+    .btn-primary:hover { background: #4e4ebf; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 1.75rem;
+    }
+
+    .stat {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 18px 20px;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .stat-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--text3);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      margin-bottom: 4px;
+    }
+
+    .stat-val {
+      font-family: Fraunces, Georgia, serif;
+      font-size: 34px;
+      font-weight: 600;
+      letter-spacing: -0.03em;
+    }
+
+    .stat-sub {
+      font-size: 11.5px;
+      color: var(--text3);
+      margin-top: 2px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1.25rem;
+      margin-bottom: 1.25rem;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .panel-title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      margin-bottom: 0.9rem;
+    }
+
+    .meta-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 1rem;
+    }
+
+    .meta-item {
+      padding: 12px;
+      border-radius: 12px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+    }
+
+    .meta-item strong {
+      display: block;
+      font-size: 11px;
+      color: var(--text3);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      margin-bottom: 4px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .search-wrap { position: relative; }
+    .search-wrap span {
+      position: absolute;
+      left: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text3);
+      font-size: 12px;
+    }
+
+    .toolbar input,
+    .toolbar select {
+      font-size: 13px;
+      padding: 8px 12px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .toolbar input { padding-left: 30px; width: 240px; }
+    .toolbar input:focus,
+    .toolbar select:focus { border-color: var(--accent); }
+
+    .result-count {
+      font-size: 12px;
+      color: var(--text3);
+      margin-bottom: 12px;
+      min-height: 18px;
+      font-weight: 500;
+    }
+
+    .table-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: var(--shadow);
+    }
+
+    table { width: 100%; border-collapse: collapse; }
+
+    th {
+      text-align: left;
+      padding: 12px 16px;
+      color: var(--text3);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      background: var(--surface2);
+    }
+
+    td {
+      padding: 13px 16px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    tbody tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: #faf9f7; }
+
+    .pr-num {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--accent);
+      white-space: nowrap;
+      background: var(--accent-light);
+      padding: 3px 8px;
+      border-radius: 6px;
+      display: inline-block;
+      text-decoration: none;
+    }
+
+    .pr-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.4; }
+    .pr-link {
+      color: var(--text3);
+      text-decoration: none;
+      font-size: 11.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      display: block;
+      margin-top: 2px;
+      overflow-wrap: anywhere;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 9px;
+      border-radius: 99px;
+      font-size: 11.5px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .b-merged { background: var(--green-bg); color: var(--green-text); border: 1px solid var(--green-border); }
+    .b-approved { background: #f0fdf6; color: #166534; border: 1px solid #bbf7d0; }
+    .b-pending { background: var(--amber-bg); color: var(--amber-text); border: 1px solid var(--amber-border); }
+    .b-hold { background: var(--gray-bg); color: var(--gray-text); border: 1px solid var(--gray-border); }
+    .b-do-not-merge { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red-border); }
+    .b-high { background: var(--red-bg); color: var(--red-text); border: 1px solid var(--red-border); }
+    .b-medium { background: var(--amber-bg); color: var(--amber-text); border: 1px solid var(--amber-border); }
+    .b-low { background: var(--blue-bg); color: var(--blue-text); border: 1px solid var(--blue-border); }
+    .b-platform { background: var(--gray-bg); color: var(--gray-text); border: 1px solid var(--gray-border); font-size: 11px; }
+
+    .msg-box {
+      background: var(--surface2);
+      border-radius: 10px;
+      padding: 18px;
+      font-size: 14px;
+      line-height: 1.75;
+      max-height: 520px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .copy-source {
+      position: fixed;
+      left: -99999px;
+      top: 0;
+      width: 760px;
+      background: white;
+      color: #1c1b20;
+      padding: 16px;
+      pointer-events: none;
+      opacity: 0;
+    }
+    .msg-head {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .msg-section {
+      margin-top: 18px;
+    }
+    .msg-section:first-child {
+      margin-top: 0;
+    }
+    .msg-section-title {
+      font-weight: 800;
+      margin-bottom: 10px;
+    }
+    .msg-priority-group {
+      margin-top: 12px;
+    }
+    .msg-priority {
+      margin-bottom: 4px;
+    }
+    .msg-platform {
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+    .msg-list {
+      margin: 0;
+    }
+    .msg-line {
+      margin: 0 0 6px;
+    }
+    .msg-link {
+      color: #0b63ce;
+      text-decoration: none;
+      word-break: break-all;
+    }
+    .msg-link:hover {
+      text-decoration: underline;
+    }
+    .empty { color: var(--text3); font-size: 13px; padding: 4rem; text-align: center; }
+    .note { color: var(--text3); font-size: 12px; }
+    .check { width: 16px; height: 16px; accent-color: var(--accent); }
+    .check[disabled] { accent-color: var(--border2); cursor: not-allowed; }
+    .st-sel {
+      font-size: 12px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      outline: none;
+      min-width: 96px;
+    }
+    .status-wrap {
+      display: grid;
+      gap: 6px;
+    }
+    .status-note {
+      color: var(--red-text);
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .appr {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 120px;
+    }
+    .appr-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      color: var(--text2);
+    }
+    .appr-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      display: inline-block;
+      background: var(--border2);
+    }
+    .appr-dot.on { background: var(--green); box-shadow: 0 0 0 3px var(--green-bg); }
+    .message-filter-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      align-items: center;
+    }
+    .message-filter-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 13px;
+      color: var(--text2);
+    }
+    .inline-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 10px;
+    }
+    .time-input {
+      font-size: 13px;
+      padding: 8px 10px;
+      border-radius: 9px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      outline: none;
+      box-shadow: var(--shadow-sm);
+    }
+
+    @media (max-width: 1600px) {
+      th,
+      td {
+        padding-left: 12px;
+        padding-right: 12px;
+      }
+    }
+
+    @media (max-width: 1080px) {
+      .layout { display: block; }
+      .sidebar {
+        width: 100%;
+        height: auto;
+        position: static;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+      }
+      .main { padding: 1.25rem; }
+      .stats { grid-template-columns: repeat(2, 1fr); }
+      .meta-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebar-logo">
+        <div class="logo-mark">PR</div>
+        <h1>PR Tracker</h1>
+        <p>Rollout manager</p>
+      </div>
+
+      <nav class="nav">
+        <span class="nav-label">Menu</span>
+        <a class="nav-item" href="/">
+          <span class="nav-icon">←</span>
+          Home
+        </a>
+        <button class="nav-item active" id="nav-board" onclick="showTab('board')">
+          <span class="nav-icon">▣</span>
+          Board
+        </button>
+        <button class="nav-item" id="nav-message" onclick="showTab('message')">
+          <span class="nav-icon">✉</span>
+          Client Message
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="btn btn-primary" id="refresh-btn">Refresh From GitHub</button>
+        <button class="btn" id="copy-btn">Copy Message</button>
+        <div class="note" id="refresh-status"></div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="page active" id="tab-board">
+        <div class="page-header">
+          <div>
+            <h2>Board</h2>
+            <p>Track all PRs not shipped to production and keep Do not merge visible.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Tracker Info</div>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <strong>Tracker JSON</strong>
+              <div id="tracker-path">Loading...</div>
+            </div>
+            <div class="meta-item">
+              <strong>Last Sync</strong>
+              <div id="last-sync">Not synced yet</div>
+            </div>
+            <div class="meta-item">
+              <strong>Required Approvers</strong>
+              <div id="approvers">Loading...</div>
+            </div>
+            <div class="meta-item">
+              <strong>Auto Sync</strong>
+              <div id="auto-sync">Loading...</div>
+            </div>
+            <div class="meta-item">
+              <strong>Next Auto Sync</strong>
+              <div id="next-auto-sync">Loading...</div>
+            </div>
+          </div>
+          <div class="inline-form">
+            <label class="message-filter-item">
+              <input class="check" id="auto-sync-enabled-input" type="checkbox" />
+              Auto sync enabled
+            </label>
+            <input class="time-input" id="auto-sync-time-input" type="time" step="60" />
+            <button class="btn" id="save-auto-sync-btn" type="button">Save Schedule</button>
+          </div>
+          <div class="note" id="auto-sync-note">Excluded rows are warnings only. You can still manually include them in the client message.</div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="toolbar">
+          <div class="search-wrap">
+            <span>⌕</span>
+            <input id="search" type="text" placeholder="Search PR# or title..." />
+          </div>
+          <select id="filter-status">
+            <option value="">All statuses</option>
+            <option value="Merged">Merged</option>
+            <option value="Approved">Approved</option>
+            <option value="Pending">Pending</option>
+            <option value="Hold">Hold</option>
+            <option value="Do not merge">Do not merge</option>
+          </select>
+          <select id="filter-prio">
+            <option value="">All priorities</option>
+            <option value="High">High</option>
+            <option value="Medium">Medium</option>
+            <option value="Low">Low</option>
+          </select>
+          <select id="filter-platform">
+            <option value="">All platforms</option>
+            <option value="Mobile">Mobile</option>
+            <option value="Web">Web</option>
+            <option value="Other">Other</option>
+          </select>
+          <select id="filter-dev">
+            <option value="">All devs</option>
+          </select>
+          <select id="filter-client">
+            <option value="">All client visibility</option>
+            <option value="included">Included in client message</option>
+            <option value="excluded">Excluded from client message</option>
+          </select>
+          <select id="filter-approval">
+            <option value="">All reviewer approval</option>
+            <option value="fully-approved">Approved by all required reviewers</option>
+            <option value="missing-any">Missing a required reviewer</option>
+            <option value="no-approvals">No approvals at all</option>
+          </select>
+        </div>
+
+        <div class="result-count" id="result-count"></div>
+        <div class="table-card" id="board-table"></div>
+      </div>
+
+      <div class="page" id="tab-message">
+        <div class="page-header">
+          <div>
+            <h2>Client Message</h2>
+            <p>Refresh first, then copy and send to the client.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Included Statuses</div>
+          <div class="message-filter-row">
+            <label class="message-filter-item">
+              <input class="check" id="message-status-merged" type="checkbox" checked />
+              Merged
+            </label>
+            <label class="message-filter-item">
+              <input class="check" id="message-status-approved" type="checkbox" checked />
+              Approved
+            </label>
+            <label class="message-filter-item">
+              <input class="check" id="message-status-pending" type="checkbox" checked />
+              Pending
+            </label>
+            <label class="message-filter-item">
+              <input class="check" id="message-status-hold" type="checkbox" />
+              Hold
+            </label>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Message</div>
+          <div class="msg-box" id="message-box"></div>
+          <div class="copy-source" id="copy-source" aria-hidden="true"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-title">Included Counts</div>
+          <div class="meta-grid">
+            <div class="meta-item">
+              <strong>Merged To Dev</strong>
+              <div id="msg-merged">0</div>
+            </div>
+            <div class="meta-item">
+              <strong>Approved</strong>
+              <div id="msg-approved">0</div>
+            </div>
+            <div class="meta-item">
+              <strong>Not Approved Yet</strong>
+              <div id="msg-pending">0</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    let state = null;
+    let selection = {};
+    let messageStatusSelection = {};
+
+    function $(id) { return document.getElementById(id); }
+
+    function showTab(tab) {
+      ['board', 'message'].forEach((name) => {
+        $('tab-' + name).classList.toggle('active', name === tab);
+        $('nav-' + name).classList.toggle('active', name === tab);
+      });
+    }
+
+    async function loadState() {
+      const response = await fetch('/api/tools/pr-tracker/state');
+      const payload = await response.json();
+      if (!response.ok) throw new Error(payload.error || 'Failed to load dashboard');
+      state = payload;
+      loadSelection();
+      loadMessageStatusSelection();
+      render();
+    }
+
+    async function refreshState() {
+      $('refresh-btn').disabled = true;
+      $('refresh-status').textContent = 'Refreshing...';
+      try {
+        const response = await fetch('/api/tools/pr-tracker/sync', { method: 'POST' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Refresh failed');
+        state = payload;
+        loadSelection();
+        loadMessageStatusSelection();
+        render();
+        $('refresh-status').textContent = 'Sync completed';
+      } catch (error) {
+        $('refresh-status').textContent = error.message;
+      } finally {
+        $('refresh-btn').disabled = false;
+      }
+    }
+
+    function render() {
+      if (!state) return;
+
+      $('tracker-path').textContent = state.trackerPath;
+      $('last-sync').textContent = state.lastSyncAt ? new Date(state.lastSyncAt).toLocaleString() : 'Not synced yet';
+      $('approvers').textContent = state.requiredApprovers.join(', ');
+      $('auto-sync').textContent = formatAutoSyncSummary();
+      $('next-auto-sync').textContent = formatOptionalDateTime(state.autoSync?.nextRunAt) || 'Not scheduled';
+      $('auto-sync-note').textContent = buildAutoSyncNote();
+      $('auto-sync-enabled-input').checked = Boolean(state.autoSync?.enabled);
+      $('auto-sync-time-input').value = state.autoSync?.time || '17:30';
+      $('auto-sync-time-input').disabled = !state.autoSync?.enabled;
+      renderDevFilter();
+      renderMessageStatusFilter();
+      const selected = selectedSections();
+      const message = buildSelectedMessage(selected);
+      $('message-box').innerHTML = message.html;
+      $('msg-merged').textContent = selected.merged.length;
+      $('msg-approved').textContent = selected.approved.length;
+      $('msg-pending').textContent = selected.pending.length;
+
+      $('stats').innerHTML = [
+        { label: 'Working PRs', value: state.workingSummary.total, sub: 'rows in tracker' },
+        { label: 'Approved', value: countByDisplayStatus('Approved'), sub: approvedSubLabel() },
+        { label: 'Pending', value: countByDisplayStatus('Pending'), sub: 'not approved yet' },
+        { label: 'Do Not Merge', value: countByDisplayStatus('Do not merge'), sub: 'visible but excluded' },
+      ].map((stat) => `
+        <div class="stat">
+          <div class="stat-label">${stat.label}</div>
+          <div class="stat-val">${stat.value}</div>
+          <div class="stat-sub">${stat.sub}</div>
+        </div>
+      `).join('');
+
+      renderBoard();
+    }
+
+    function countByDisplayStatus(status) {
+      return state.prs.filter((pr) => pr.displayStatus === status).length;
+    }
+
+    function formatAutoSyncSummary() {
+      const autoSync = state?.autoSync;
+      if (!autoSync?.enabled) return 'Off';
+      return `Daily at ${autoSync.time} (${autoSync.timezone})`;
+    }
+
+    function formatOptionalDateTime(value) {
+      if (!value) return '';
+      return new Date(value).toLocaleString();
+    }
+
+    function buildAutoSyncNote() {
+      const autoSync = state?.autoSync;
+      const parts = ['Excluded rows are warnings only. You can still manually include them in the client message.'];
+
+      if (autoSync?.enabled) {
+        parts.push('Auto sync only runs while this local server is running.');
+      }
+
+      if (autoSync?.lastError) {
+        parts.push(`Last auto-sync error: ${autoSync.lastError}`);
+      }
+
+      return parts.join(' ');
+    }
+
+    async function saveAutoSyncSettings() {
+      $('refresh-status').textContent = 'Saving auto sync...';
+      try {
+        const response = await fetch('/api/tools/pr-tracker/update-auto-sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            enabled: $('auto-sync-enabled-input').checked,
+            time: $('auto-sync-time-input').value,
+          }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Failed to save auto sync');
+        state = payload;
+        render();
+        $('refresh-status').textContent = 'Auto sync updated';
+      } catch (error) {
+        $('refresh-status').textContent = error.message;
+      }
+    }
+
+    function renderDevFilter() {
+      const select = $('filter-dev');
+      const current = select.value;
+      const devs = [...new Set(
+        state.prs
+          .map((pr) => String(pr.dev || '').trim())
+          .filter(Boolean)
+      )].sort((left, right) => left.localeCompare(right));
+
+      select.innerHTML = [
+        '<option value="">All devs</option>',
+        ...devs.map((dev) => `<option value="${escapeHtml(dev)}">${escapeHtml(dev)}</option>`),
+      ].join('');
+
+      if (devs.includes(current)) {
+        select.value = current;
+      }
+    }
+
+    function renderBoard() {
+      const query = $('search').value.trim().toLowerCase();
+      const status = $('filter-status').value;
+      const prio = $('filter-prio').value;
+      const platform = $('filter-platform').value;
+      const dev = $('filter-dev').value;
+      const client = $('filter-client').value;
+      const approval = $('filter-approval').value;
+
+      const rows = state.prs.filter((pr) => {
+        if (status && pr.displayStatus !== status) return false;
+        if (prio && pr.prio !== prio) return false;
+        if (platform && pr.platform !== platform) return false;
+        if (dev && String(pr.dev || '') !== dev) return false;
+        if (client === 'included' && !pr.clientVisible) return false;
+        if (client === 'excluded' && pr.clientVisible) return false;
+        const missing = pr.missingApprovers || [];
+        const approvals = pr.approvedBy || [];
+        if (approval === 'fully-approved' && missing.length) return false;
+        if (approval === 'missing-any' && !missing.length) return false;
+        if (approval === 'no-approvals' && approvals.length) return false;
+        if (!query) return true;
+        return [pr.num, pr.title, pr.dev, pr.platform, pr.baseRef]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      });
+
+      $('result-count').textContent =
+        rows.length === state.prs.length ? '' : `Showing ${rows.length} of ${state.prs.length} PRs`;
+
+      if (!rows.length) {
+        $('board-table').innerHTML = '<div class="empty">No PRs match your filters.</div>';
+        return;
+      }
+
+      $('board-table').innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>PR</th>
+              <th>Dev</th>
+              <th>Date</th>
+              <th>Title</th>
+              <th>Platform</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>Approvals</th>
+              <th>Include</th>
+              <th>Client</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(renderRow).join('')}
+          </tbody>
+        </table>
+      `;
+    }
+
+    function renderRow(pr) {
+      return `
+        <tr>
+          <td><a class="pr-num" href="${pr.url}" target="_blank" rel="noreferrer">#${escapeHtml(pr.num)}</a></td>
+          <td>${escapeHtml(pr.dev || '')}</td>
+          <td>${escapeHtml(pr.date || '')}</td>
+          <td>
+            <div class="pr-title">${escapeHtml(pr.title || '')}</div>
+            <a class="pr-link" href="${pr.url}" target="_blank" rel="noreferrer">${escapeHtml(pr.url || '')}</a>
+          </td>
+          <td><span class="badge b-platform">${escapeHtml(pr.platform || 'Other')}</span></td>
+          <td>${renderPriorityCell(pr)}</td>
+          <td>${renderStatusCell(pr)}</td>
+          <td>${renderApprovals(pr)}</td>
+          <td>${renderIncludeCell(pr)}</td>
+          <td>${pr.clientVisible ? 'Included' : `<span class="note">${escapeHtml(pr.excludedReason || 'Excluded')}</span>`}</td>
+        </tr>
+      `;
+    }
+
+    function renderPriorityCell(pr) {
+      return `
+        <select class="st-sel" onchange="updatePriority('${escapeHtml(pr.num)}', this.value)">
+          ${['High', 'Medium', 'Low'].map((prio) => `
+            <option value="${prio}" ${pr.prio === prio ? 'selected' : ''}>${prio}</option>
+          `).join('')}
+        </select>
+      `;
+    }
+
+    function renderStatusCell(pr) {
+      return `
+        <div class="status-wrap">
+          <select class="st-sel" onchange="updateStatus('${escapeHtml(pr.num)}', this.value)">
+            ${['Pending', 'Approved', 'Merged', 'Hold', 'Closed'].map((status) => `
+              <option value="${status}" ${pr.status === status ? 'selected' : ''}>${status}</option>
+            `).join('')}
+          </select>
+          ${pr.displayStatus === 'Do not merge' ? '<span class="status-note">Do not merge</span>' : ''}
+        </div>
+      `;
+    }
+
+    function approvedSubLabel() {
+      const required = state.requiredApprovers || [];
+      if (!required.length) return 'at least one approval';
+      return required.length === 1 ? '1 required approver' : `${required.length} required approvers`;
+    }
+
+    function renderApprovals(pr) {
+      const required = state.requiredApprovers || [];
+      const approved = new Set((pr.approvedBy || []).map((name) => String(name).toLowerCase()));
+
+      // With required approvers configured, show one line per reviewer. Without
+      // them, just list whoever approved.
+      if (required.length) {
+        return `
+          <div class="appr">
+            ${required
+              .map(
+                (name) =>
+                  `<div class="appr-line"><span class="appr-dot ${
+                    approved.has(String(name).toLowerCase()) ? 'on' : ''
+                  }"></span>${escapeHtml(name)}</div>`,
+              )
+              .join('')}
+          </div>
+        `;
+      }
+
+      if (!approved.size) {
+        return '<div class="appr"><div class="appr-line"><span class="appr-dot"></span>No approvals</div></div>';
+      }
+
+      return `
+        <div class="appr">
+          ${(pr.approvedBy || [])
+            .map((name) => `<div class="appr-line"><span class="appr-dot on"></span>${escapeHtml(name)}</div>`)
+            .join('')}
+        </div>
+      `;
+    }
+
+    function renderIncludeCell(pr) {
+      const checked = isSelected(pr.num) ? 'checked' : '';
+      return `<input class="check" type="checkbox" ${checked} onchange="toggleInclude('${escapeHtml(pr.num)}', this.checked)" />`;
+    }
+
+    function statusClass(status) {
+      if (status === 'Do not merge') return 'b-do-not-merge';
+      return 'b-' + String(status).toLowerCase().replaceAll(' ', '-');
+    }
+
+    function selectionKey() {
+      return 'pr_tracker_selection_v1:' + (state?.trackerPath || 'default');
+    }
+
+    function messageStatusSelectionKey() {
+      return 'pr_tracker_message_status_v1:' + (state?.trackerPath || 'default');
+    }
+
+    function loadSelection() {
+      try {
+        const raw = localStorage.getItem(selectionKey());
+        selection = raw ? JSON.parse(raw) : {};
+      } catch {
+        selection = {};
+      }
+    }
+
+    function saveSelection() {
+      localStorage.setItem(selectionKey(), JSON.stringify(selection));
+    }
+
+    function loadMessageStatusSelection() {
+      const defaults = { Merged: true, Approved: true, Pending: true, Hold: false };
+      try {
+        const raw = localStorage.getItem(messageStatusSelectionKey());
+        messageStatusSelection = raw ? { ...defaults, ...JSON.parse(raw) } : defaults;
+      } catch {
+        messageStatusSelection = defaults;
+      }
+    }
+
+    function saveMessageStatusSelection() {
+      localStorage.setItem(messageStatusSelectionKey(), JSON.stringify(messageStatusSelection));
+    }
+
+    function renderMessageStatusFilter() {
+      const mapping = {
+        merged: 'Merged',
+        approved: 'Approved',
+        pending: 'Pending',
+        hold: 'Hold',
+      };
+
+      Object.entries(mapping).forEach(([suffix, status]) => {
+        $('message-status-' + suffix).checked = Boolean(messageStatusSelection[status]);
+      });
+    }
+
+    function isMessageStatusEnabled(status) {
+      return Boolean(messageStatusSelection[status]);
+    }
+
+    function toggleMessageStatus(status, checked) {
+      messageStatusSelection[status] = checked;
+      saveMessageStatusSelection();
+      render();
+    }
+
+    function isSelected(num) {
+      const key = String(num);
+      if (selection[key] === undefined) {
+        const pr = state.prs.find((item) => String(item.num) === key);
+        return Boolean(pr && pr.clientVisible);
+      }
+      return Boolean(selection[key]);
+    }
+
+    function toggleInclude(num, checked) {
+      selection[String(num)] = checked;
+      saveSelection();
+      render();
+    }
+
+    async function updateStatus(num, status) {
+      $('refresh-status').textContent = 'Saving status...';
+      try {
+        const response = await fetch('/api/tools/pr-tracker/update-status', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ num, status }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Failed to update status');
+        state = payload;
+        loadSelection();
+        render();
+        $('refresh-status').textContent = 'Status updated';
+      } catch (error) {
+        $('refresh-status').textContent = error.message;
+      }
+    }
+
+    async function updatePriority(num, prio) {
+      $('refresh-status').textContent = 'Saving priority...';
+      try {
+        const response = await fetch('/api/tools/pr-tracker/update-priority', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ num, prio }),
+        });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.error || 'Failed to update priority');
+        state = payload;
+        loadSelection();
+        render();
+        $('refresh-status').textContent = 'Priority updated';
+      } catch (error) {
+        $('refresh-status').textContent = error.message;
+      }
+    }
+
+    function selectedSections() {
+      const rows = state.prs.filter((pr) => isSelected(pr.num));
+      return {
+        merged: isMessageStatusEnabled('Merged') ? rows.filter((pr) => pr.status === 'Merged') : [],
+        approved: isMessageStatusEnabled('Approved') ? rows.filter((pr) => pr.status === 'Approved') : [],
+        pending: isMessageStatusEnabled('Pending') ? rows.filter((pr) => pr.status === 'Pending') : [],
+        hold: isMessageStatusEnabled('Hold') ? rows.filter((pr) => pr.status === 'Hold') : [],
+      };
+    }
+
+    function buildSelectedMessage(sections) {
+      const plain = ['PRs submitted for rollout (' + formatDateForMessage() + ')', ''];
+      const html = [`<div class="msg-head">PRs submitted for rollout (${escapeHtml(formatDateForMessage())})</div>`];
+
+      if (sections.merged.length) {
+        plain.push('*✅ MERGED TO DEV*');
+        html.push(renderMessageSection('✅ MERGED TO DEV', sections.merged));
+        sections.merged.forEach((pr, index) => plain.push(renderPlainMessageItem(pr, index)));
+        plain.push('');
+      }
+
+      if (sections.approved.length) {
+        plain.push('*✅ APPROVED*');
+        html.push(renderMessageSection('✅ APPROVED', sections.approved));
+        sections.approved.forEach((pr, index) => plain.push(renderPlainMessageItem(pr, index)));
+        plain.push('');
+      }
+
+      if (sections.pending.length) {
+        plain.push('*❌ NOT APPROVED YET*');
+        html.push('<div class="msg-section-title"><strong>❌ NOT APPROVED YET</strong></div>');
+        ['High', 'Medium', 'Low'].forEach((priority) => {
+          const priorityRows = sections.pending.filter((pr) => pr.prio === priority);
+          if (!priorityRows.length) return;
+          const icon = priority === 'High' ? '🔴' : priority === 'Medium' ? '🟡' : '🟢';
+          plain.push(`${icon} _${priority} Priority_`);
+          html.push(`<div class="msg-priority-group"><div class="msg-priority">${icon} <u>${escapeHtml(priority)} Priority</u></div>`);
+          ['Mobile', 'Web', 'Other'].forEach((platform) => {
+            const platformRows = priorityRows.filter((pr) => pr.platform === platform);
+            if (!platformRows.length) return;
+            plain.push(`*${platform}*`);
+            html.push(`<div class="msg-platform"><strong>${escapeHtml(platform)}</strong></div>`);
+            html.push('<div class="msg-list">');
+            platformRows.forEach((pr, index) => {
+              plain.push(renderPlainMessageItem(pr, index));
+              html.push(renderHtmlMessageItem(pr, index));
+            });
+            html.push('</div>');
+          });
+          html.push('</div><br>');
+        });
+      }
+
+      if (sections.hold.length) {
+        plain.push('*⏸ HOLD*');
+        html.push(renderMessageSection('⏸ HOLD', sections.hold));
+        sections.hold.forEach((pr, index) => plain.push(renderPlainMessageItem(pr, index)));
+        plain.push('');
+      }
+
+      return {
+        plain: plain.join('\n').trim(),
+        html: html.join(''),
+      };
+    }
+
+    function renderMessageSection(title, rows) {
+      return `
+        <div class="msg-section-title"><strong>${escapeHtml(title)}</strong></div>
+        <div class="msg-list">
+          ${rows.map((pr, index) => renderHtmlMessageItem(pr, index)).join('')}
+        </div>
+        <br>
+      `;
+    }
+
+    function renderHtmlMessageItem(pr, index) {
+      return `
+        <div class="msg-line">
+          ${index + 1}. [${escapeHtml(pr.dev || '')}] [${escapeHtml(pr.date || '')}]
+          <a class="msg-link" href="${escapeHtml(pr.url || '')}" target="_blank" rel="noreferrer">${escapeHtml(pr.url || '')}</a>
+          - ${escapeHtml(pr.title || '')}
+        </div>
+      `;
+    }
+
+    function renderPlainMessageItem(pr, index) {
+      return `${index + 1}. [${pr.dev}] [${pr.date}] ${pr.url} - ${pr.title}`;
+    }
+
+    function formatDateForMessage() {
+      const date = state?.lastSyncAt ? new Date(state.lastSyncAt) : new Date();
+      return date.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function copyRichMessageFromDom(message) {
+      const source = $('copy-source');
+      source.innerHTML = message.html;
+
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(source);
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      try {
+        return document.execCommand('copy');
+      } finally {
+        selection.removeAllRanges();
+      }
+    }
+
+    $('refresh-btn').addEventListener('click', refreshState);
+    $('copy-btn').addEventListener('click', async () => {
+      const message = buildSelectedMessage(selectedSections());
+      try {
+        if (copyRichMessageFromDom(message)) {
+          $('refresh-status').textContent = 'Message copied';
+          showTab('message');
+          return;
+        }
+
+        if (navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'text/html': new Blob([message.html], { type: 'text/html' }),
+              'text/plain': new Blob([message.plain], { type: 'text/plain' }),
+            }),
+          ]);
+        } else {
+          await navigator.clipboard.writeText(message.plain);
+        }
+        $('refresh-status').textContent = 'Message copied';
+        showTab('message');
+      } catch {
+        $('refresh-status').textContent = 'Clipboard copy failed';
+      }
+    });
+
+    ['search', 'filter-status', 'filter-prio', 'filter-platform', 'filter-dev', 'filter-client', 'filter-approval'].forEach((id) => {
+      $(id).addEventListener(id === 'search' ? 'input' : 'change', renderBoard);
+    });
+
+    [
+      ['message-status-merged', 'Merged'],
+      ['message-status-approved', 'Approved'],
+      ['message-status-pending', 'Pending'],
+      ['message-status-hold', 'Hold'],
+    ].forEach(([id, status]) => {
+      $(id).addEventListener('change', (event) => toggleMessageStatus(status, event.target.checked));
+    });
+
+    $('auto-sync-enabled-input').addEventListener('change', (event) => {
+      $('auto-sync-time-input').disabled = !event.target.checked;
+    });
+    $('save-auto-sync-btn').addEventListener('click', saveAutoSyncSettings);
+
+    loadState().catch((error) => {
+      $('refresh-status').textContent = error.message;
+    });
+  </script>
+</body>
+</html>

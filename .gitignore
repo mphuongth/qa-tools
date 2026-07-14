@@ -1,6 +1,9 @@
 node_modules/
 .DS_Store
 
+# Hub runtime state: selected repo, cached reports, sync output
+apps/hub/.generated/
+
 # Local project config and generated reports
 qa-tools.profile.json
 pr-tracker-backup.json
