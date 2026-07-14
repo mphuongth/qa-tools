@@ -94,7 +94,6 @@ const GENERIC_DESCRIPTION_RE =
 const PATH_ONLY_DESCRIPTION_RE =
   /^(updates?|changes?)\s+.+\s+code\s+(?:in|across)\s+`?[\w./-]+`?(?:,\s*`?[\w./-]+`?)*\.?$/i;
 const DESCRIPTION_MODEL = process.env.PROD_DELIVERY_DESCRIPTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
-const PLATFORM_SUMMARY_MODEL = process.env.PROD_DELIVERY_PLATFORM_SUMMARY_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 
 // Which tool writes the descriptions. "auto" picks the first one this machine can actually use:
 // the Claude CLI reuses an existing login, and OPENAI_API_KEY covers machines without it.
@@ -136,22 +135,19 @@ Rules:
 - Output ONLY the sentence, nothing else.`;
 const REPORT_TIMEZONE = process.env.PROD_DELIVERY_REPORT_TIMEZONE || 'Asia/Ho_Chi_Minh';
 const REPORT_TIMEZONE_LABEL = process.env.PROD_DELIVERY_REPORT_TIMEZONE_LABEL || 'VNT';
-const platformSummaryPrompt = () => `You are writing a technical delivery summary for a client-facing report. Given a list of merged pull requests, each with a date, PR number, git commit title, plain-English description, and platform label, write concise bullet-point summaries grouped by platform.
-Platforms: ${platformOrder().join(', ')}
-Rules for each platform section:
-- Write 4–8 bullet points per platform, depending on volume
-- Each bullet should group related PRs into a single coherent sentence — do not write one bullet per PR
-- Lead with the most impactful or user-facing work first
-- Use plain, clear technical English — no marketing language, no fluff
-- Name specific features, components, or systems (e.g. "live chat", "checkout flow", "deploy-web workflow") rather than vague descriptions
-- If a PR is a revert followed by a re-apply, mention both in one bullet (e.g. "rolled back and re-applied")
-- For security patches or dependency bumps, mention the CVE or version number if available
-- Do not repeat information across platforms — if a feature spans platforms, mention the cross-platform nature in the most relevant section and reference it briefly in others
-Tone: engineering-facing, factual, past tense. Written as if a senior engineer is summarising what shipped to a technical client.
-Format per bullet:
-- Start with the subject (feature, system, or component), not a verb
-- One sentence per bullet, max ~25 words
-- No PR numbers in the bullets`;
+// Highlights summarize the already-written per-PR descriptions into a few grouped bullets. The
+// descriptions are the source of truth here, so the writer must not add anything they do not say.
+const PLATFORM_HIGHLIGHTS_PROMPT = `You group a platform's shipped pull requests into a few highlight bullets for a Product Owner reading a production delivery report.
+
+You are given one plain-English description per PR. Those descriptions are the source of truth. Summarize and group them — do not add facts they do not contain, and do not invent benefits.
+
+Rules:
+- Return the requested number of bullets or fewer, each one sentence, plain English a non-engineer can follow.
+- Group related PRs into a single bullet instead of writing one bullet per PR.
+- Lead with the most user-facing or impactful work.
+- Start each bullet with the feature, system, or area — not a verb.
+- No marketing language, no line counts, no file names, no PR numbers, no markdown.
+- Output only the bullet lines, each starting with "- ".`;
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -303,11 +299,11 @@ export async function buildProdDeliveryReport({
     highlights: [],
   })).filter((group) => group.count > 0);
 
-  for (const group of platformGroups) {
+  await runWithConcurrency(platformGroups, DESCRIPTION_CONCURRENCY, async (group) => {
     group.highlights =
       curatedPlatformHighlights[group.platform] ||
-      buildPlatformHighlights(group.platform, group.items, { detailed: group.count < 20 });
-  }
+      (await buildPlatformHighlights(group.platform, group.items));
+  });
 
   return {
     generatedAt: new Date().toISOString(),
@@ -1181,7 +1177,7 @@ async function derivePoDescription({ prNumber, body, ref, title, platform, evide
   const writer = await resolveDescriptionWriter();
   if (writer) {
     const prompt = buildEvidencePrompt({ prNumber, title, ref, body, platform, evidence, commitSubjects });
-    const written = await writer.write(prompt);
+    const written = normalizeAiDescription(await writer.write(prompt));
     if (written && !isLowQualityGeneratedCandidate(written, title)) {
       return { description: written, source: `ai (${writer.name})`, confidence: 'medium' };
     }
@@ -1194,8 +1190,10 @@ async function derivePoDescription({ prNumber, body, ref, title, platform, evide
   };
 }
 
+// Each writer returns raw model text. Callers normalize it: descriptions collapse to one sentence,
+// highlights parse the multi-line bullet list, so normalization cannot live in here.
 const DESCRIPTION_WRITERS = {
-  // Claude Code and Codex both reuse an existing CLI login, so neither needs an API key.
+  // The Claude CLI reuses an existing login, so it needs no API key.
   claude: {
     name: 'claude',
     available: () => canRunBinary(CLAUDE_BIN, ['--version']),
@@ -1205,7 +1203,7 @@ const DESCRIPTION_WRITERS = {
         ['-p', prompt, '--model', CLAUDE_MODEL, '--allowed-tools', ''],
         { timeout: WRITER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
       );
-      return normalizeAiDescription(stdout);
+      return stdout;
     },
   },
   openai: {
@@ -1221,7 +1219,7 @@ const DESCRIPTION_WRITERS = {
           { role: 'user', content: prompt },
         ],
       });
-      return normalizeAiDescription(response.output_text || '');
+      return response.output_text || '';
     },
   },
 };
@@ -1399,62 +1397,6 @@ function actionVerbFromEvidence(evidence) {
   return ['was updated', 'were updated'];
 }
 
-async function maybeGeneratePlatformHighlightsWithOpenAI(platform, items) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || !items.length) return null;
-
-  try {
-    const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({ apiKey });
-    const response = await client.responses.create({
-      model: PLATFORM_SUMMARY_MODEL,
-      input: [
-        { role: 'system', content: platformSummaryPrompt() },
-        {
-          role: 'user',
-          content: buildPlatformSummaryPrompt(platform, items),
-        },
-      ],
-    });
-
-    const bullets = normalizePlatformSummaryOutput(response.output_text || '');
-    return bullets.length ? bullets : null;
-  } catch {
-    return null;
-  }
-}
-
-function buildPlatformSummaryPrompt(platform, items) {
-  const maxBullets = Math.max(4, Math.min(8, Math.round(items.length / 10) + 3));
-  return [
-    `Platform: ${platform}`,
-    `Desired bullets: ${maxBullets}`,
-    '',
-    'Pull requests:',
-    ...items.map((item) =>
-      [
-        `- Date: ${item.date}`,
-        `  PR: #${item.prNumber}`,
-        `  Title: ${item.title}`,
-        `  Description: ${item.description}`,
-        `  Paths: ${item.paths.join(', ') || '(none)'}`,
-      ].join('\n'),
-    ),
-    '',
-    'Return only bullet lines beginning with "- ".',
-  ].join('\n');
-}
-
-function normalizePlatformSummaryOutput(text) {
-  return String(text || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => line.startsWith('- '))
-    .map((line) => line.replace(/^- /, '').trim())
-    .filter(Boolean);
-}
-
 function normalizeAiDescription(value) {
   const text = String(value || '')
     .replace(/^[-*]\s*/, '')
@@ -1514,49 +1456,53 @@ function platformSurfaceName(platform) {
   return 'Shared platform';
 }
 
-function buildPlatformHighlights(platform, items, options = {}) {
+// Summarizes a platform's PRs into a few highlight bullets. The per-PR descriptions are already
+// accurate, so with a writer available we group them; without one we just list them. Neither path
+// invents content the descriptions do not contain.
+async function buildPlatformHighlights(platform, items) {
   const descriptions = items
-    .map((item) => normalizeHumanText(cleanupSentence(item.description || item.title, 280)))
+    .map((item) => normalizeHumanText(cleanupSentence(item.description || item.title, 300)))
     .filter(Boolean)
     .filter((value) => !isGenericDescription(value))
     .filter((value, index, values) => values.indexOf(value) === index);
 
   if (!descriptions.length) return [];
-  if (options.detailed) {
-    return descriptions
-      .flatMap((value) => splitLongSummaryText(value, 300))
-      .slice(0, Math.max(8, descriptions.length));
-  }
-  if (descriptions.length <= 2) {
+
+  // Few enough PRs that each description is itself a highlight; grouping would only lose detail.
+  if (descriptions.length <= 3) {
     return descriptions.map((value) => finalizePlatformBullet(value));
   }
 
-  return buildRemainingPlatformBullets(items).slice(0, 8);
+  const writer = await resolveDescriptionWriter();
+  if (writer) {
+    const grouped = await generatePlatformHighlights(writer, platform, descriptions);
+    if (grouped.length) return grouped;
+  }
+
+  // Fallback: list the descriptions verbatim. Plain, but every bullet is a real shipped change.
+  return descriptions.map((value) => finalizePlatformBullet(value)).slice(0, 12);
 }
 
-function summarizeRemainingItems(platform, items) {
-  if (!items.length) return [];
+async function generatePlatformHighlights(writer, platform, descriptions) {
+  const count = Math.max(3, Math.min(8, Math.round(descriptions.length / 4) + 2));
+  const prompt = [
+    PLATFORM_HIGHLIGHTS_PROMPT,
+    '',
+    `Platform: ${platform}`,
+    `Number of bullets: ${count} or fewer`,
+    '',
+    'PR descriptions:',
+    ...descriptions.map((value) => `- ${value}`),
+  ].join('\n');
 
-  const ranked = items
-    .map((item) => ({
-      item,
-      score: scoreSummaryRichness(item.description) + item.paths.length,
-    }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(3, items.length))
-    .map(({ item }) => normalizeHumanText(cleanupSentence(item.description || item.title, 180)))
+  const raw = await writer.write(prompt);
+  return String(raw || '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => finalizePlatformBullet(line.replace(/^-\s*/, '')))
     .filter(Boolean)
-    .filter((value) => !isGenericDescription(value));
-
-  if (!ranked.length) return [];
-  if (ranked.length === 1) return [ranked[0]];
-  return [`Other ${platform.toLowerCase()} rollout work included ${joinPhrases(ranked)}.`];
-}
-
-function scoreSummaryRichness(summary) {
-  const text = String(summary || '').trim();
-  if (!text) return 0;
-  return Math.min(text.length, 180);
+    .slice(0, count);
 }
 
 function joinPhrases(values) {
@@ -1566,68 +1512,11 @@ function joinPhrases(values) {
 }
 
 function finalizePlatformBullet(value) {
-  return normalizeHumanText(compactSummaryText(value, 300));
+  const text = normalizeHumanText(compactSummaryText(value, 300));
+  if (!text || /[.!?…]$/.test(text)) return text;
+  return `${text}.`;
 }
 
-function buildRemainingPlatformBullets(items) {
-  const descriptions = items
-    .map((item) => normalizeHumanText(cleanupSentence(item.description || item.title, 220)))
-    .filter(Boolean)
-    .filter((value) => !isGenericDescription(value));
-
-  if (!descriptions.length) return [];
-  if (descriptions.length <= 2) {
-    return descriptions.flatMap((value) => splitLongSummaryText(value, 300));
-  }
-
-  const bullets = [];
-  for (let index = 0; index < descriptions.length; index += 2) {
-    const chunk = descriptions.slice(index, index + 2);
-    if (chunk.length === 1) {
-      bullets.push(...splitLongSummaryText(chunk[0], 300));
-      continue;
-    }
-
-    const merged = `${chunk[0].replace(/\.$/, '')}; ${chunk[1].replace(/\.$/, '')}.`;
-    if (compactSummaryText(merged, 300).endsWith('…')) {
-      bullets.push(...splitLongSummaryText(chunk[0], 300));
-      bullets.push(...splitLongSummaryText(chunk[1], 300));
-      continue;
-    }
-
-    bullets.push(finalizePlatformBullet(merged));
-  }
-  return bullets;
-}
-
-
-function collectFeaturePhrases(items, rules) {
-  const text = items.map((item) => `${item.title} ${item.description}`).join(' ').toLowerCase();
-  const features = [];
-  for (const [pattern, phrase] of rules) {
-    if (pattern.test(text)) features.push(phrase);
-  }
-  return features;
-}
-
-function sentenceWithFeatures(prefix, features, matchCount) {
-  if (!features.length) {
-    return compactSummaryText(`${prefix} across ${matchCount} PR${matchCount === 1 ? '' : 's'}.`, 300);
-  }
-  const intro = matchCount > 1 ? `${prefix}, including ` : `${prefix} with `;
-  const kept = [];
-
-  for (const feature of features) {
-    const candidate = `${intro}${joinPhrases([...kept, feature])}.`;
-    if (candidate.length > 300 && kept.length) break;
-    if (candidate.length > 300) {
-      return compactSummaryText(`${prefix}.`, 300);
-    }
-    kept.push(feature);
-  }
-
-  return compactSummaryText(`${intro}${joinPhrases(kept)}.`, 300);
-}
 
 function compactSummaryText(value, maxLength = 300) {
   let text = normalizeHumanText(cleanupSentence(value, maxLength * 2));
