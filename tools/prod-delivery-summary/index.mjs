@@ -95,31 +95,47 @@ const PATH_ONLY_DESCRIPTION_RE =
   /^(updates?|changes?)\s+.+\s+code\s+(?:in|across)\s+`?[\w./-]+`?(?:,\s*`?[\w./-]+`?)*\.?$/i;
 const DESCRIPTION_MODEL = process.env.PROD_DELIVERY_DESCRIPTION_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
 const PLATFORM_SUMMARY_MODEL = process.env.PROD_DELIVERY_PLATFORM_SUMMARY_MODEL || process.env.OPENAI_MODEL || 'gpt-4.1-mini';
+
+// Which tool writes the descriptions. "auto" picks the first one this machine can actually use:
+// the Claude CLI reuses an existing login, and OPENAI_API_KEY covers machines without it.
+// Codex was evaluated and dropped: `codex exec -o` fails to write its output file once the
+// prompt carries a real diff and calls run concurrently, and it is ~7x slower per PR.
+const DESCRIPTION_WRITER = process.env.PROD_DELIVERY_WRITER || 'auto';
+const CLAUDE_BIN = process.env.PROD_DELIVERY_CLAUDE_BIN || 'claude';
+const CLAUDE_MODEL = process.env.PROD_DELIVERY_CLAUDE_MODEL || 'sonnet';
+const WRITER_TIMEOUT_MS = Number(process.env.PROD_DELIVERY_WRITER_TIMEOUT_MS || 120000);
+const DESCRIPTION_CONCURRENCY = Math.max(1, Number(process.env.PROD_DELIVERY_CONCURRENCY || 4));
+const MAX_DIFF_CHARS = Number(process.env.PROD_DELIVERY_MAX_DIFF_CHARS || 8000);
+
+const LOCKFILE_RE = /(^|\/)(pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb|Podfile\.lock|Gemfile\.lock|poetry\.lock|Cargo\.lock|go\.sum)$/i;
+const MANIFEST_RE = /(^|\/)(package\.json|pnpm-workspace\.yaml|Podfile|Gemfile|pyproject\.toml|Cargo\.toml|go\.mod)$/i;
+const DOC_RE = /\.(md|mdx|rst|txt)$/i;
+const ASSET_RE = /\.(png|jpe?g|gif|svg|webp|ico|mp4|woff2?|ttf|otf)$/i;
+const MIGRATION_RE = /(^|\/)migrations?\//i;
+const CONFIG_RE =
+  /(^\.github\/|(^|\/)(Dockerfile|wrangler\.(jsonc?|toml)|tsconfig[\w.]*\.json|vercel\.json|\.env[\w.-]*|[\w.-]+\.config\.(ts|js|mjs|cjs))$|\.(ya?ml|tf)$)/i;
+// Path segments that are scaffolding rather than the name of the thing that changed.
+const SCAFFOLDING_SEGMENTS = new Set([
+  'src', 'app', 'apps', 'api', 'lib', 'libs', 'utils', 'helpers', 'components', 'component',
+  'pages', 'page', 'hooks', 'services', 'service', 'shared', 'packages', 'workers', 'worker',
+  'server', 'client', 'common', 'core', 'index', 'main', 'types', 'constants', 'config', 'internal',
+]);
+
+const DESCRIPTION_WRITER_PROMPT = `You write one-line release descriptions for a Product Owner reading a production delivery report.
+
+PR titles, branch names, and commit messages are frequently vague, wrong, or misleading, and PR bodies are often empty. The changed files and the diff are the source of truth. When the title conflicts with the diff, trust the diff and ignore the title.
+
+Rules:
+- Exactly one sentence, 15 to 35 words, plain English that a non-engineer can follow.
+- Describe what changed for users, admins, or operations.
+- Open with the feature, system, or area that changed. Never open with "This PR", "This change", "The change", "The fix", or "The security fix".
+- Never mention line counts, file names, file paths, function names, class names, or component names.
+- Never claim an outcome the diff does not actually show. If the diff only proves an area changed, say that plainly rather than inventing a benefit.
+- No markdown, no bullets, no quotes, no PR numbers.
+- Do not explain your reasoning and do not mention the diff, the files, the title, or the change type.
+- Output ONLY the sentence, nothing else.`;
 const REPORT_TIMEZONE = process.env.PROD_DELIVERY_REPORT_TIMEZONE || 'Asia/Ho_Chi_Minh';
 const REPORT_TIMEZONE_LABEL = process.env.PROD_DELIVERY_REPORT_TIMEZONE_LABEL || 'VNT';
-const DESCRIPTION_PROMPT = `You write one-line Product Owner friendly release descriptions for pull requests that reached production.
-
-Goal:
-- Describe what the PR changed in plain English for a non-engineer stakeholder.
-- Be specific enough to explain user/admin/business impact.
-- Stay in one sentence.
-
-Style rules:
-- 18 to 38 words.
-- Start with the changed thing or area, not with "This PR".
-- Prefer concrete nouns from the codebase: "Live chat", "Videos", "Payload admin", "Mobile player", "Download API", "Gift paywall".
-- Explain the outcome using phrases like "now", "adds", "lets", "uses", "fixes", "prevents", "hides", "supports", "restores".
-- Mention implementation details only when they explain the outcome clearly (examples: AsyncStorage, Cloudflare R2, LaunchDarkly, ActionSheet, StoreKit 2).
-- Avoid vague wording like "improves system", "enhances experience", "refactors code", "minor fixes".
-- Avoid markdown formatting, bullet markers, quotes, or PR-number references.
-- Output only the final one-line description.
-
-When reading context:
-- Use changed files to identify the surface area.
-- Use PR title/body and commit subjects to infer intent.
-- Ignore noise like lockfiles, tests, lint-only changes, or merge/revert mechanics unless they materially affect the shipped result.
-- If the change is operational/admin-facing, describe the admin or deployment outcome, not low-level code mechanics.
-`;
 const platformSummaryPrompt = () => `You are writing a technical delivery summary for a client-facing report. Given a list of merged pull requests, each with a date, PR number, git commit title, plain-English description, and platform label, write concise bullet-point summaries grouped by platform.
 Platforms: ${platformOrder().join(', ')}
 Rules for each platform section:
@@ -187,6 +203,7 @@ export async function buildProdDeliveryReport({
   const curatedPlatformHighlights = await loadCuratedPlatformHighlights(repoPath, range);
   const prodPrs = await rebuildProdPrMap(repoPath, range);
   const rows = [];
+  const prepared = [];
 
   for (const item of prodPrs) {
     const mergeMeta = await readMergeMeta(repoPath, item.mergeSha);
@@ -203,33 +220,42 @@ export async function buildProdDeliveryReport({
     const title = parsedSubject?.title || derivePrTitle(mergeMeta.body, mergeMeta.ref, item.prNumber);
     const commitSubjects = await listBranchCommitSubjects(repoPath, item.mergeSha);
     const referenceDescription = referenceDescriptions.get(String(item.prNumber));
-    const descriptionChoice = override.description
-      ? {
-        description: override.description,
-        source: 'curated override',
-        confidence: 'high',
-      }
-      : referenceDescription
-        ? {
-          description: referenceDescription,
-          source: 'saved reference',
-          confidence: mergeMeta.body ? 'medium' : 'low',
-        }
-        : {
-          description: await derivePoDescription({
-        repoPath,
-        prNumber: item.prNumber,
-        body: mergeMeta.body,
-        ref: mergeMeta.ref,
-        title,
-        diffPaths,
-        platform,
-            commitSubjects,
-        referenceExamples: referenceData.examples,
-          }),
-          source: 'generated heuristic',
-          confidence: mergeMeta.body || commitSubjects.length ? 'medium' : 'low',
-        };
+
+    let descriptionChoice = null;
+    if (override.description) {
+      descriptionChoice = { description: override.description, source: 'curated override', confidence: 'high' };
+    } else if (referenceDescription) {
+      descriptionChoice = {
+        description: referenceDescription,
+        source: 'saved reference',
+        confidence: mergeMeta.body ? 'medium' : 'low',
+      };
+    }
+
+    prepared.push({
+      item, mergeMeta, diffPaths, override, parsedSubject, platformChoice,
+      platform, title, commitSubjects, referenceDescription, descriptionChoice,
+    });
+  }
+
+  // Only PRs without a curated or saved description need the writer, and each call costs seconds,
+  // so run the remainder in parallel rather than one at a time.
+  const needsDescription = prepared.filter((entry) => !entry.descriptionChoice);
+  await runWithConcurrency(needsDescription, DESCRIPTION_CONCURRENCY, async (entry) => {
+    const evidence = await collectDiffEvidence(repoPath, entry.item.mergeSha, entry.diffPaths);
+    entry.descriptionChoice = await derivePoDescription({
+      prNumber: entry.item.prNumber,
+      body: entry.mergeMeta.body,
+      ref: entry.mergeMeta.ref,
+      title: entry.title,
+      platform: entry.platform,
+      evidence,
+      commitSubjects: entry.commitSubjects,
+    });
+  });
+
+  for (const entry of prepared) {
+    const { item, mergeMeta, diffPaths, override, parsedSubject, platformChoice, platform, title, referenceDescription, descriptionChoice } = entry;
     const reviewWarnings = buildReviewWarnings({
       platformChoice,
       descriptionChoice,
@@ -340,7 +366,14 @@ export async function syncReferenceDescriptionFile(repoPath, report) {
 
   const appended = [];
   const rewritten = [];
+  const skipped = [];
   for (const pr of report.prs) {
+    // Fallback text is deliberately plain. Persisting it would freeze it in as a "saved
+    // reference" and it would never be regenerated once a writer is available again.
+    if (pr.descriptionSource === 'evidence fallback') {
+      skipped.push(pr.prNumber);
+      continue;
+    }
     const rawLine = formatReferenceTableRow(pr);
     const existing = rowsByPr.get(pr.prNumber);
     if (!existing) {
@@ -366,7 +399,7 @@ export async function syncReferenceDescriptionFile(repoPath, report) {
   }
 
   if (!appended.length && !rewritten.length) {
-    return { updated: false, appendedPrNumbers: [], rewrittenPrNumbers: [], filePath };
+    return { updated: false, appendedPrNumbers: [], rewrittenPrNumbers: [], skippedPrNumbers: skipped, filePath };
   }
 
   const orderedRows = [...rowsByPr.values()]
@@ -380,6 +413,7 @@ export async function syncReferenceDescriptionFile(repoPath, report) {
     updated: true,
     appendedPrNumbers: appended,
     rewrittenPrNumbers: rewritten,
+    skippedPrNumbers: skipped,
     filePath,
   };
 }
@@ -721,6 +755,161 @@ async function listDiffPaths(repoPath, mergeSha) {
   }
 }
 
+// Merge commits diff the branch side against the merge base; a squashed PR has no second parent
+// and diffs against its own parent instead.
+async function resolveDiffRange(repoPath, mergeSha) {
+  try {
+    const mergeBase = (await gitText(repoPath, ['merge-base', `${mergeSha}^1`, `${mergeSha}^2`])).trim();
+    return { fromRef: mergeBase || `${mergeSha}^1`, toRef: `${mergeSha}^2` };
+  } catch {
+    return { fromRef: `${mergeSha}^`, toRef: mergeSha };
+  }
+}
+
+function classifyDiffFile(diffPath) {
+  if (isUnitTestPath(diffPath) || isE2ePath(diffPath)) return 'test';
+  if (LOCKFILE_RE.test(diffPath)) return 'lockfile';
+  if (MANIFEST_RE.test(diffPath)) return 'manifest';
+  if (MIGRATION_RE.test(diffPath)) return 'migration';
+  if (DOC_RE.test(diffPath)) return 'docs';
+  if (ASSET_RE.test(diffPath)) return 'asset';
+  if (CONFIG_RE.test(diffPath)) return 'config';
+  return 'source';
+}
+
+// Groups by the repo's own top-level layout rather than a hardcoded app list, so this works on
+// any project shape.
+function workspaceOf(diffPath) {
+  const parts = String(diffPath || '').split('/');
+  if (parts[0] === '.github') return '.github';
+  if (parts.length > 2 && ['apps', 'packages', 'services', 'workers', 'shared', 'libs', 'modules'].includes(parts[0])) {
+    return `${parts[0]}/${parts[1]}`;
+  }
+  if (parts.length > 1) return parts[0];
+  return 'root';
+}
+
+function workspaceLabel(workspace) {
+  if (workspace === '.github') return 'CI workflows';
+  if (workspace === 'root') return 'the repository root';
+  const [group, name] = String(workspace).split('/');
+  if (!name) return humanizeAreaName(group);
+  const human = humanizeAreaName(name);
+  if (group === 'workers') return `the ${human} worker`;
+  if (group === 'packages' || group === 'libs' || group === 'modules') return `the ${human} package`;
+  if (group === 'services') return `the ${human} service`;
+  if (group === 'shared') return `shared ${human}`;
+  if (group === 'apps') return `the ${human} app`;
+  return human;
+}
+
+// Pulls "next": "1.2.3" -> "1.2.4" pairs straight out of the manifest diff. In a dependency bump
+// this is the only real signal, and it is exact.
+function parsePackageVersionChanges(manifestDiff) {
+  const before = new Map();
+  const after = new Map();
+  for (const line of String(manifestDiff || '').split('\n')) {
+    const match = /^([+-])\s*"?([\w@/.-]+)"?\s*[:=]\s*"?([\w.^~>=< -]+?)"?,?\s*$/.exec(line);
+    if (!match) continue;
+    const [, sign, name, version] = match;
+    if (!/\d/.test(version)) continue;
+    (sign === '-' ? before : after).set(name, version.replace(/^[\^~]/, '').trim());
+  }
+
+  const changes = [];
+  for (const [name, to] of after) {
+    const from = before.get(name);
+    if (!from || from === to) continue;
+    changes.push({ name, from, to });
+  }
+  return changes;
+}
+
+async function collectDiffEvidence(repoPath, mergeSha, diffPaths) {
+  const { fromRef, toRef } = await resolveDiffRange(repoPath, mergeSha);
+  const files = [];
+
+  try {
+    const lines = await gitLines(repoPath, ['diff', '--numstat', fromRef, toRef]);
+    for (const line of lines) {
+      const parts = line.split('\t');
+      if (parts.length < 3) continue;
+      const [added, deleted, diffPath] = parts;
+      if (!diffPath) continue;
+      files.push({
+        path: diffPath,
+        added: Number(added) || 0,
+        deleted: Number(deleted) || 0,
+        kind: classifyDiffFile(diffPath),
+        workspace: workspaceOf(diffPath),
+      });
+    }
+  } catch {
+    for (const diffPath of diffPaths) {
+      files.push({ path: diffPath, added: 0, deleted: 0, kind: classifyDiffFile(diffPath), workspace: workspaceOf(diffPath) });
+    }
+  }
+
+  const counts = {};
+  for (const file of files) counts[file.kind] = (counts[file.kind] || 0) + 1;
+  const substantive = files.filter((file) => !['lockfile', 'asset'].includes(file.kind));
+  const workspaces = [...new Set(substantive.map((file) => file.workspace))];
+
+  let packageChanges = [];
+  if (counts.manifest) {
+    try {
+      // Pathspecs resolve relative to the git cwd, so :(top) anchors them at the repo root.
+      const manifestDiff = await gitText(repoPath, [
+        'diff',
+        fromRef,
+        toRef,
+        '--',
+        ...files.filter((file) => file.kind === 'manifest').map((file) => `:(top)${file.path}`),
+      ]);
+      packageChanges = parsePackageVersionChanges(manifestDiff);
+    } catch {
+      packageChanges = [];
+    }
+  }
+
+  const codeFiles = files.filter((file) => ['source', 'migration'].includes(file.kind));
+  let hunks = '';
+  if (codeFiles.length) {
+    try {
+      const raw = await gitText(repoPath, [
+        'diff',
+        '-U2',
+        fromRef,
+        toRef,
+        '--',
+        ...codeFiles.slice(0, 20).map((file) => `:(top)${file.path}`),
+      ]);
+      hunks = raw.length > MAX_DIFF_CHARS ? `${raw.slice(0, MAX_DIFF_CHARS)}\n… (diff truncated)` : raw;
+    } catch {
+      hunks = '';
+    }
+  }
+
+  return { files, counts, workspaces, packageChanges, hunks, archetype: detectArchetype(counts) };
+}
+
+// Any real code change outranks everything else. Otherwise the dominant non-code kind wins, so a
+// docs PR that also nudges one config value is still a docs PR.
+function detectArchetype(counts) {
+  if ((counts.source || 0) || (counts.migration || 0)) return 'code';
+
+  const test = counts.test || 0;
+  const docs = counts.docs || 0;
+  const config = counts.config || 0;
+  const deps = (counts.manifest || 0) + (counts.lockfile || 0);
+
+  if (test) return 'tests';
+  if (docs && docs >= config) return 'docs';
+  if (deps) return 'dependency-bump';
+  if (config) return 'config';
+  return 'code';
+}
+
 function categorizePlatform(diffPaths, ref) {
   return analyzePlatform(diffPaths, ref).platform;
 }
@@ -986,86 +1175,228 @@ function derivePrTitle(body, ref, prNumber) {
   return humanizeRef(ref);
 }
 
-async function derivePoDescription({ repoPath, prNumber, body, ref, title, diffPaths, platform, commitSubjects, referenceExamples }) {
-  const aiDescription = await maybeGeneratePoDescriptionWithOpenAI({
-    repoPath,
-    prNumber,
-    title,
-    body,
-    ref,
-    platform,
-    diffPaths,
-    commitSubjects,
-    referenceExamples,
-  });
-  if (aiDescription && !isLowQualityGeneratedCandidate(aiDescription, title)) return aiDescription;
+// Titles, branch names, commit subjects, and PR bodies are unreliable, so every path below is
+// driven by the diff instead.
+async function derivePoDescription({ prNumber, body, ref, title, platform, evidence, commitSubjects }) {
+  const writer = await resolveDescriptionWriter();
+  if (writer) {
+    const prompt = buildEvidencePrompt({ prNumber, title, ref, body, platform, evidence, commitSubjects });
+    const written = await writer.write(prompt);
+    if (written && !isLowQualityGeneratedCandidate(written, title)) {
+      return { description: written, source: `ai (${writer.name})`, confidence: 'medium' };
+    }
+  }
 
-  const prose = bodyToProse(body);
-  const referencedDescription = inferReferencedPrDescription({ body, ref, title, referenceExamples, prNumber });
-  const heuristicDescription = inferHeuristicDescription({ title, ref, diffPaths, platform, commitSubjects });
-  const commitBased = summarizeCommitSubjects(commitSubjects);
-  const inferred = inferSummaryFromRef(ref, platform);
-  const titleBased = makeTitleSummary(title, platform);
-  const fallbackDescription = makeFallbackPoDescription({ title, ref, platform, diffPaths, commitSubjects });
-
-  const candidates = [
-    prose,
-    referencedDescription,
-    heuristicDescription,
-    commitBased,
-    inferred,
-    fallbackDescription,
-    titleBased,
-    ...commitSubjects,
-  ]
-    .map((value) => normalizeHumanText(cleanupSentence(value, 170)))
-    .filter(Boolean)
-    .filter((value) => !isMergeNoiseText(value))
-    .filter((value) => !isLowQualityGeneratedCandidate(value, title))
-    .filter((value, index, values) => values.indexOf(value) === index);
-
-  return candidates[0] || makeFallbackPoDescription({ title, ref, platform, diffPaths, commitSubjects });
+  return {
+    description: describeFromEvidence({ evidence, platform }),
+    source: 'evidence fallback',
+    confidence: 'low',
+  };
 }
 
-async function maybeGeneratePoDescriptionWithOpenAI({
-  prNumber,
-  title,
-  body,
-  ref,
-  platform,
-  diffPaths,
-  commitSubjects,
-  referenceExamples,
-}) {
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey) return '';
+const DESCRIPTION_WRITERS = {
+  // Claude Code and Codex both reuse an existing CLI login, so neither needs an API key.
+  claude: {
+    name: 'claude',
+    available: () => canRunBinary(CLAUDE_BIN, ['--version']),
+    async write(prompt) {
+      const { stdout } = await execFile(
+        CLAUDE_BIN,
+        ['-p', prompt, '--model', CLAUDE_MODEL, '--allowed-tools', ''],
+        { timeout: WRITER_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 },
+      );
+      return normalizeAiDescription(stdout);
+    },
+  },
+  openai: {
+    name: 'openai',
+    available: async () => Boolean(process.env.OPENAI_API_KEY),
+    async write(prompt) {
+      const { default: OpenAI } = await import('openai');
+      const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+      const response = await client.responses.create({
+        model: DESCRIPTION_MODEL,
+        input: [
+          { role: 'system', content: DESCRIPTION_WRITER_PROMPT },
+          { role: 'user', content: prompt },
+        ],
+      });
+      return normalizeAiDescription(response.output_text || '');
+    },
+  },
+};
 
-  const examples = selectReferenceExamples(referenceExamples, platform, prNumber);
-  const prompt = buildDescriptionPrompt({
-    prNumber,
-    title,
-    body,
-    ref,
-    platform,
-    diffPaths,
-    commitSubjects,
-    examples,
-  });
+let resolvedWriter;
 
-  try {
-    const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({ apiKey });
-    const response = await client.responses.create({
-      model: DESCRIPTION_MODEL,
-      input: [
-        { role: 'system', content: DESCRIPTION_PROMPT },
-        { role: 'user', content: prompt },
-      ],
-    });
-    return normalizeAiDescription(response.output_text || '');
-  } catch {
-    return '';
+async function resolveDescriptionWriter() {
+  if (resolvedWriter !== undefined) return resolvedWriter;
+
+  if (DESCRIPTION_WRITER === 'none') {
+    resolvedWriter = null;
+    return resolvedWriter;
   }
+
+  const order = DESCRIPTION_WRITER === 'auto' ? ['claude', 'openai'] : [DESCRIPTION_WRITER];
+  for (const name of order) {
+    const writer = DESCRIPTION_WRITERS[name];
+    if (writer && (await writer.available())) {
+      resolvedWriter = wrapWriter(writer);
+      return resolvedWriter;
+    }
+  }
+
+  // Degrading silently is what made the old descriptions quietly wrong, so say it once.
+  process.stderr.write(
+    `[prod-delivery] No description writer available (tried: ${order.join(', ')}). Falling back to plain `
+    + 'diff-derived descriptions; they are marked low confidence and are not saved to the reference file. '
+    + 'Install the Claude or Codex CLI, or set OPENAI_API_KEY. Set PROD_DELIVERY_WRITER=none to silence this.\n',
+  );
+  resolvedWriter = null;
+  return resolvedWriter;
+}
+
+function wrapWriter(writer) {
+  let failureWarned = false;
+  return {
+    name: writer.name,
+    async write(prompt) {
+      try {
+        return await writer.write(prompt);
+      } catch (error) {
+        if (!failureWarned) {
+          failureWarned = true;
+          process.stderr.write(`[prod-delivery] ${writer.name} writer failed: ${error?.message || error}\n`);
+        }
+        return '';
+      }
+    },
+  };
+}
+
+async function canRunBinary(bin, args) {
+  try {
+    await execFile(bin, args, { timeout: 20000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  let cursor = 0;
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor;
+      cursor += 1;
+      await worker(items[index]);
+    }
+  });
+  await Promise.all(runners);
+}
+
+function buildEvidencePrompt({ prNumber, title, ref, body, platform, evidence, commitSubjects }) {
+  const grouped = new Map();
+  for (const file of evidence.files) {
+    if (file.kind === 'lockfile') continue;
+    if (!grouped.has(file.workspace)) grouped.set(file.workspace, []);
+    grouped.get(file.workspace).push(`${file.path} (${file.kind}, +${file.added}/-${file.deleted})`);
+  }
+
+  const sections = [
+    DESCRIPTION_WRITER_PROMPT,
+    '',
+    `PR #${prNumber}`,
+    `Platform: ${platform}`,
+    `Title (unreliable): ${title || '(none)'}`,
+    `Branch (unreliable): ${ref || '(none)'}`,
+    `PR body: ${body ? String(body).slice(0, 600) : '(empty)'}`,
+    `Commit subjects (unreliable): ${commitSubjects.join(' | ') || '(none)'}`,
+    `Change type detected from the diff: ${evidence.archetype}`,
+    `Areas touched: ${evidence.workspaces.map(workspaceLabel).join(', ') || '(none)'}`,
+  ];
+
+  if (evidence.packageChanges.length) {
+    sections.push(
+      '',
+      'Dependency version changes:',
+      ...evidence.packageChanges.slice(0, 12).map((change) => `- ${change.name}: ${change.from} -> ${change.to}`),
+    );
+  }
+
+  if (grouped.size) {
+    sections.push('', 'Changed files (lockfiles omitted):');
+    for (const [workspace, list] of grouped) {
+      sections.push(`  ${workspaceLabel(workspace)}:`, ...list.slice(0, 12).map((entry) => `    - ${entry}`));
+    }
+  }
+
+  if (evidence.hunks) {
+    sections.push('', 'Diff of the changed code:', evidence.hunks);
+  }
+
+  return sections.join('\n');
+}
+
+// Plain but true. Used only when no writer is available; it never asserts an outcome the diff
+// does not show, which is the failure mode the old canned-sentence rules had.
+function describeFromEvidence({ evidence, platform }) {
+  const places = evidence.workspaces.length
+    ? joinPhrases(evidence.workspaces.map(workspaceLabel))
+    : platformSurfaceName(platform);
+
+  if (evidence.archetype === 'dependency-bump') {
+    const names = evidence.packageChanges.slice(0, 3).map((change) => change.name);
+    const subject = names.length ? `${joinPhrases(names)} and related packages` : 'Project dependencies';
+    return `${subject} were updated to newer versions across ${places}.`;
+  }
+  if (evidence.archetype === 'docs') return `Setup and release documentation was refreshed for ${places}.`;
+  if (evidence.archetype === 'tests') return `Automated test coverage was extended for ${places}.`;
+  if (evidence.archetype === 'config') return `Deployment and configuration settings were adjusted for ${places}.`;
+
+  const areas = featureAreasFromEvidence(evidence);
+  const [singular, plural] = actionVerbFromEvidence(evidence);
+  if (!areas.length) return `Part of ${places} ${singular} in this release.`;
+  const noun = areas.length > 1 ? 'flows' : 'flow';
+  return `The ${joinPhrases(areas)} ${noun} in ${places} ${areas.length > 1 ? plural : singular}.`;
+}
+
+function featureAreasFromEvidence(evidence) {
+  const areas = [];
+  for (const file of evidence.files) {
+    if (!['source', 'migration'].includes(file.kind)) continue;
+    const relative = file.workspace === 'root' || !file.path.startsWith(`${file.workspace}/`)
+      ? file.path
+      : file.path.slice(file.workspace.length + 1);
+    const segments = relative.split('/');
+    const stem = (segments.pop() || '').replace(/\.[^.]+$/, '');
+    const meaningful = [...segments]
+      .reverse()
+      .find((segment) => segment && !segment.startsWith('[') && !SCAFFOLDING_SEGMENTS.has(segment.toLowerCase()));
+    const picked = meaningful || (SCAFFOLDING_SEGMENTS.has(stem.toLowerCase()) ? '' : stem);
+    if (!picked) continue;
+    const human = humanizeAreaName(picked);
+    if (human && !areas.includes(human)) areas.push(human);
+  }
+  return areas.slice(0, 3);
+}
+
+function humanizeAreaName(value) {
+  return String(value || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[-_]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Deliberately ignores the title and branch name: those are the unreliable inputs this path
+// exists to work around. Whether code was added or edited is visible in the diff itself.
+function actionVerbFromEvidence(evidence) {
+  const codeFiles = evidence.files.filter((file) => ['source', 'migration'].includes(file.kind));
+  if (!codeFiles.length) return ['was updated', 'were updated'];
+  if (codeFiles.every((file) => file.deleted === 0 && file.added > 0)) return ['was added', 'were added'];
+  if (codeFiles.every((file) => file.added === 0 && file.deleted > 0)) return ['was removed', 'were removed'];
+  return ['was updated', 'were updated'];
 }
 
 async function maybeGeneratePlatformHighlightsWithOpenAI(platform, items) {
@@ -1124,63 +1455,23 @@ function normalizePlatformSummaryOutput(text) {
     .filter(Boolean);
 }
 
-function buildDescriptionPrompt({ prNumber, title, body, ref, platform, diffPaths, commitSubjects, examples }) {
-  const parts = [
-    'Reference examples in the target style:',
-    ...examples.map((example, index) => [
-      `Example ${index + 1}:`,
-      `- PR: #${example.prNumber}`,
-      `- Platform: ${example.platform}`,
-      `- Title: ${example.title}`,
-      `- Description: ${example.description}`,
-    ].join('\n')),
-    '',
-    'Now write the production description for this PR:',
-    `- PR: #${prNumber}`,
-    `- Platform: ${platform}`,
-    `- Source ref: ${ref || '(unknown)'}`,
-    `- Title: ${title}`,
-    `- Body: ${body || '(empty)'}`,
-    `- Changed files: ${diffPaths.join(', ') || '(none)'}`,
-    `- Commit subjects: ${commitSubjects.join(' | ') || '(none)'}`,
-  ];
-  return parts.join('\n');
-}
-
-function selectReferenceExamples(referenceExamples, platform, prNumber) {
-  const samePlatform = referenceExamples.filter((example) => example.platform === platform && example.prNumber !== String(prNumber));
-  const fallback = referenceExamples.filter((example) => example.prNumber !== String(prNumber));
-  return [...samePlatform.slice(-4), ...fallback.slice(-2)].slice(0, 6);
-}
-
 function normalizeAiDescription(value) {
-  return String(value || '')
+  const text = String(value || '')
     .replace(/^[-*]\s*/, '')
     .replace(/^["']|["']$/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (!text) return '';
+
+  // Models sometimes prefix the answer with reasoning about the diff. Keep the sentence that
+  // actually describes the change, and drop the commentary about how it was worked out.
+  const sentences = text.split(/(?<=[.!?])\s+(?=[A-Z])/).map((part) => part.trim()).filter(Boolean);
+  if (sentences.length <= 1) return text;
+  const described = sentences.filter((sentence) => !META_SENTENCE_RE.test(sentence));
+  return (described[0] || sentences[sentences.length - 1]).trim();
 }
 
-function bodyToProse(body) {
-  const chunks = [];
-  const seen = new Set();
-  for (const rawLine of String(body || '').split('\n')) {
-    let line = rawLine.trim();
-    if (!line || shouldSkipBodyLine(line)) continue;
-    if (line.startsWith('- ') || line.startsWith('* ') || line.startsWith('• ')) {
-      line = line.slice(2).trim();
-    }
-    line = line.replace(/^#+\s*/, '').trim();
-    if (!line) continue;
-    if (isMergeNoiseText(line)) continue;
-    const normalized = line.toLowerCase().replace(/\s+/g, ' ');
-    if (seen.has(normalized)) continue;
-    seen.add(normalized);
-    chunks.push(line);
-  }
-  if (!chunks.length) return '';
-  return normalizeHumanText(chunks.join(' '));
-}
+const META_SENTENCE_RE = /\b(diffs?|changed files?|commit|pr title|the title|change type|this (is|appears)|based on)\b/i;
 
 function shouldSkipBodyLine(line) {
   const lower = String(line || '').toLowerCase().trim();
@@ -1212,80 +1503,6 @@ async function listBranchCommitSubjects(repoPath, mergeSha) {
   }
 }
 
-function inferSummaryFromRef(ref, platform) {
-  const normalized = stripOwnerPrefix(ref)
-    .toLowerCase()
-    .replaceAll('-', '')
-    .replaceAll('_', '')
-    .replaceAll('/', '');
-
-  if (!normalized) return '';
-  if (normalized.includes('livechat')) return `Adds or improves live chat on ${platform.toLowerCase()}.`;
-  if (normalized.includes('slatetolexical') || normalized.includes('lexical')) return 'Migrates rich text editing to Lexical and updates affected screens.';
-  if (normalized.includes('gifting') || normalized.includes('gift')) return 'Updates gifting behavior and related checkout handling.';
-  if (normalized.includes('documentary')) return 'Refreshes the documentary browsing experience and related content blocks.';
-  if (normalized.includes('appversion')) return 'Adds app-version support and related release controls.';
-  if (normalized.includes('payloadlb') || normalized.includes('loadbalanc')) return 'Improves Payload deployment and load-balancer controls.';
-  if (normalized.includes('notification')) return 'Updates notification handling and related delivery flows.';
-  return '';
-}
-
-function makeTitleSummary(title, platform) {
-  let cleanTitle = normalizeHumanText(cleanupSentence(title, 150));
-  if (!cleanTitle) return '';
-  if (isMergeNoiseText(cleanTitle)) return '';
-  cleanTitle = cleanTitle.replace(/^Feature\s+/i, '').replace(/^Fix\s*:\s*/i, 'Fix ');
-  const lower = cleanTitle.toLowerCase();
-  if (lower.startsWith('fix ') || lower.startsWith('fix:')) return cleanTitle;
-  if (lower.startsWith('add ') || lower.startsWith('adds ')) return cleanTitle;
-  if (lower.startsWith('update ') || lower.startsWith('improve ') || lower.startsWith('remove ') || lower.startsWith('prevent ')) {
-    return cleanTitle;
-  }
-  return `${capitalize(platform.toLowerCase())}: ${cleanTitle}`;
-}
-
-function makeFallbackPoDescription({ title, ref, platform, diffPaths, commitSubjects }) {
-  const topic = extractFallbackTopic({ title, ref, diffPaths, commitSubjects });
-  const surface = platformSurfaceName(platform);
-  const lowerTopic = topic.toLowerCase();
-
-  if (/^fix\b|^hotfix\b|^bugfix\b/.test(lowerTopic)) {
-    return `${surface} ${stripLeadingAction(topic)} was fixed so the released flow behaves correctly.`;
-  }
-  if (/^add\b|^support\b|^enable\b|^create\b/.test(lowerTopic)) {
-    return `${surface} ${stripLeadingAction(topic)} support was added for the release.`;
-  }
-  if (/^update\b|^improve\b|^optimi[sz]e\b|^refactor\b/.test(lowerTopic)) {
-    return `${surface} ${stripLeadingAction(topic)} was updated for the production release.`;
-  }
-  if (/^docs?\b|readme|documentation/.test(lowerTopic)) {
-    return `${surface} documentation was updated for ${stripLeadingAction(topic).toLowerCase()}.`;
-  }
-
-  return `${surface} ${topic} was included in the production release.`;
-}
-
-function extractFallbackTopic({ title, ref, diffPaths, commitSubjects }) {
-  const candidates = [title, ...commitSubjects, humanizeRef(ref), inferTopicFromPaths(diffPaths)]
-    .map((value) => normalizeHumanText(cleanupSentence(value, 120)))
-    .filter(Boolean)
-    .filter((value) => !isMergeNoiseText(value))
-    .filter((value) => !isGenericDescription(value));
-  return candidates[0] || 'release change';
-}
-
-function inferTopicFromPaths(diffPaths) {
-  const files = diffPaths.map((item) => item.split('/').pop() || '').filter(Boolean);
-  const interesting = files.find((file) => !/^(index|package|pnpm-lock|yarn.lock|next-env|eslintignore)$/i.test(file));
-  return interesting ? interesting.replace(/\.[^.]+$/, '') : '';
-}
-
-function stripLeadingAction(value) {
-  return String(value || '')
-    .replace(/^(fix|hotfix|bugfix|add|adds|support|supports|enable|enables|create|creates|update|updates|improve|improves|optimi[sz]e|optimi[sz]es|refactor|refactors|docs?|documentation)\b[:/\s-]*/i, '')
-    .trim();
-}
-
 function platformSurfaceName(platform) {
   if (platform === 'Payload') return 'Payload admin';
   if (platform === 'Mobile') return 'Mobile app';
@@ -1295,80 +1512,6 @@ function platformSurfaceName(platform) {
   if (platform === 'Deployment') return 'Deployment workflow';
   if (platform === 'Web') return 'Web app';
   return 'Shared platform';
-}
-
-function summarizeCommitSubjects(commitSubjects) {
-  const kept = commitSubjects
-    .map((value) => normalizeHumanText(cleanupSentence(value, 160)))
-    .filter(Boolean)
-    .filter((value) => !isMergeNoiseText(value));
-  return kept[0] || '';
-}
-
-function inferReferencedPrDescription({ body, ref, title, referenceExamples, prNumber }) {
-  const candidates = extractReferencedPrNumbers(body, ref, title).filter((value) => value !== String(prNumber));
-  if (!candidates.length) return '';
-  for (const candidate of candidates) {
-    const match = referenceExamples.find((example) => example.prNumber === candidate && example.description);
-    if (match) return match.description;
-  }
-  const sourceRef = extractReferencedMergeRef(body);
-  return sourceRef ? humanizeRef(sourceRef) : '';
-}
-
-function extractReferencedPrNumbers(body, ref, title) {
-  const text = [body, ref, title].filter(Boolean).join('\n');
-  const numbers = new Set();
-  for (const match of text.matchAll(/backport-(\d+)/gi)) {
-    numbers.add(match[1]);
-  }
-  for (const match of text.matchAll(/merge pull request #(\d+)/gi)) {
-    numbers.add(match[1]);
-  }
-  return [...numbers];
-}
-
-function extractReferencedMergeRef(body) {
-  const match = String(body || '').match(/merge pull request #\d+ from (\S+)/i);
-  return match?.[1] || '';
-}
-
-/**
- * Non-LLM fallback description. Only rules that hold for any repo live here;
- * anything project-specific belongs in the profile's prOverrides, and everything
- * unmatched falls through to summarizePathScope().
- */
-function inferHeuristicDescription({ title, ref, diffPaths, platform, commitSubjects }) {
-  const lowerTitle = String(title || '').toLowerCase();
-  const combined = [title, ref, ...commitSubjects, ...diffPaths].join(' ').toLowerCase();
-  const paths = diffPaths.join(' ');
-
-  if (/^revert/.test(lowerTitle)) {
-    return `A previous ${platformSurfaceName(platform)} change was rolled back to restore the last known-good behaviour.`;
-  }
-  if (/lock(file)?|pnpm-lock|package-lock|yarn\.lock/.test(combined) && /update|refresh|bump|conflict/.test(lowerTitle)) {
-    return 'Dependency lockfiles were refreshed so package resolution stays consistent across environments.';
-  }
-  if (/cve-\d{4}-\d+/.test(combined) || (/security/.test(combined) && /bump|upgrade|patch|update/.test(combined))) {
-    return 'Dependencies were upgraded to pick up a security patch while keeping builds aligned.';
-  }
-  if (/\.github\/workflows|workflow_dispatch|ci pipeline/.test(combined)) {
-    return 'CI and deployment workflows were updated so release pipelines run more reliably.';
-  }
-  if (/readme|docs|documentation/.test(combined)) {
-    return `${platformSurfaceName(platform)} documentation was updated with clearer setup and release guidance.`;
-  }
-  if (/\.(test|spec)\.|__tests__|snapshot/.test(paths) && /fix|add|update/.test(lowerTitle)) {
-    return `${platformSurfaceName(platform)} test coverage was updated so the suite passes reliably.`;
-  }
-  return '';
-}
-
-function summarizePathScope(diffPaths, platform) {
-  const topFolders = [...new Set(diffPaths.map((item) => item.split('/').slice(0, 2).join('/')).filter(Boolean))].slice(0, 3);
-  if (!topFolders.length) return '';
-  if (topFolders.length === 1) return `Updates ${platform.toLowerCase()} code in \`${topFolders[0]}\`.`;
-  return `Updates ${platform.toLowerCase()} code across ${topFolders.map((item) => `\`${item}\``).join(', ')}.`;
 }
 
 function buildPlatformHighlights(platform, items, options = {}) {

@@ -82,11 +82,27 @@ Every key is optional:
 | `platformKeywords` | delivery | Text hints when file paths do not identify a platform |
 | `trackBase` / `prodBranch` | tracker, delivery | Branch names, if you do not use `dev` / `prod` |
 
-## Optional: LLM descriptions
+## PR descriptions
 
-`prod-delivery-summary` writes plain-English PR descriptions. Without an API key it falls back to
-heuristics derived from titles and paths. To use an LLM, set `OPENAI_API_KEY` (model overridable via
-`PROD_DELIVERY_DESCRIPTION_MODEL`).
+`prod-delivery-summary` writes plain-English PR descriptions from the **diff**, not from the PR
+title. Titles, branch names, and commit subjects are unreliable in most repos, and PR bodies are
+often empty, so the tool reads the changed files, their sizes, dependency version changes, and the
+actual diff hunks, and hands that to a writer.
+
+Writers are tried in order and picked automatically (`PROD_DELIVERY_WRITER` to force one):
+
+| Writer | Requirement |
+| --- | --- |
+| `claude` | The Claude Code CLI, already logged in. No API key. |
+| `openai` | `OPENAI_API_KEY` (model via `PROD_DELIVERY_DESCRIPTION_MODEL`). |
+
+With no writer available the tool still runs: it falls back to a plain sentence derived from the
+diff. That text is deliberately unexciting but never claims an outcome the diff does not show. It
+is marked low confidence, flagged for review, and is **not** written to the reference file, so it
+gets regenerated properly once a writer is available.
+
+Useful knobs: `PROD_DELIVERY_CONCURRENCY` (default 4), `PROD_DELIVERY_MAX_DIFF_CHARS` (default
+8000), `PROD_DELIVERY_WRITER=none` to disable the writer entirely.
 
 ## Authentication
 
