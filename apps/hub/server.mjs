@@ -25,7 +25,9 @@ import { analyzePullRequest } from '../../tools/qa-pr-impact/index.mjs';
 const execFile = promisify(execFileCb);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT_DIR = path.resolve(__dirname, '..', '..');
-const DEFAULT_PORT = Number(process.env.QA_TOOLS_PORT || process.env.PR_TRACKER_PORT || 4311);
+// 4311 is what the in-repo tool this was extracted from still listens on, so the
+// portable hub stays off it — otherwise the two cannot run side by side.
+const DEFAULT_PORT = Number(process.env.QA_TOOLS_PORT || process.env.PR_TRACKER_PORT || 4380);
 const DEFAULT_HOST = process.env.QA_TOOLS_HOST || process.env.PR_TRACKER_HOST || '127.0.0.1';
 const APP_DIR = __dirname;
 const TOOLS_UI_DIR = path.join(APP_DIR, 'tools');
@@ -143,6 +145,21 @@ async function main() {
   await loadPrTrackerAutoSyncSettings();
   startPrTrackerAutoSyncScheduler();
   const server = createServer(handleRequest);
+
+  // A taken port is a normal thing to hit — another copy of the hub, or another
+  // local tool — and it deserves an answer, not Node's unhandled-error stack.
+  server.on('error', (error) => {
+    if (error.code === 'EADDRINUSE') {
+      process.stderr.write(
+        `Port ${DEFAULT_PORT} is already in use, so the hub cannot start.\n` +
+          `Something else is listening on it — find it with: lsof -nP -iTCP:${DEFAULT_PORT} -sTCP:LISTEN\n` +
+          `Or run the hub somewhere else: QA_TOOLS_PORT=${DEFAULT_PORT + 1} pnpm serve\n`,
+      );
+      process.exit(1);
+    }
+    throw error;
+  });
+
   server.listen(DEFAULT_PORT, DEFAULT_HOST, () => {
     process.stdout.write(`QA tools hub: http://${DEFAULT_HOST}:${DEFAULT_PORT}\n`);
     process.stdout.write(hubSettings.repo ? `Repo: ${hubSettings.repo}\n` : 'No repo selected yet — set one in the UI.\n');
