@@ -1507,10 +1507,10 @@ async function buildPlatformHighlights(platform, items) {
     if (grouped.length) return grouped;
   }
 
-  // Fallback with no writer: there is nothing to group with, so keep the first `target`
-  // descriptions as the highlights. No detail is lost — the full PR List table below the summary
-  // still lists every PR with its description.
-  return descriptions.slice(0, target).map((value) => finalizePlatformBullet(value));
+  // Fallback with no writer: there is nothing to group semantically, but every description must
+  // still be represented. Pack them into bullets up to a length budget so all are covered while
+  // the count stays well below one-bullet-per-PR.
+  return packDescriptions(descriptions);
 }
 
 // 4–19 PRs: up to one bullet per PR (cap 8), so only genuinely related work gets grouped.
@@ -1520,27 +1520,71 @@ function highlightBulletTarget(count) {
   return Math.max(4, Math.min(8, Math.round(count / 8)));
 }
 
-async function generatePlatformHighlights(writer, platform, descriptions, target) {
-  const prompt = [
-    PLATFORM_HIGHLIGHTS_PROMPT,
-    '',
-    `Platform: ${platform}`,
-    `Number of bullets: ${target} or fewer`,
-    '',
-    'PR descriptions:',
-    ...descriptions.map((value) => `- ${value}`),
-  ].join('\n');
+// Concatenates descriptions into as few bullets as fit within maxLen. Loses nothing — every
+// description ends up in some bullet — while roughly halving the bullet count versus one-per-PR.
+function packDescriptions(descriptions, maxLen = 280) {
+  const bullets = [];
+  let current = '';
+  for (const description of descriptions) {
+    const piece = String(description).replace(/\.$/, '').trim();
+    if (!piece) continue;
+    const candidate = current ? `${current}; ${piece}` : piece;
+    if (current && candidate.length > maxLen) {
+      bullets.push(current);
+      current = piece;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) bullets.push(current);
+  return bullets.map((value) => finalizePlatformBullet(value));
+}
 
+async function generatePlatformHighlights(writer, platform, descriptions, target) {
+  let bullets = await writerHighlightBullets(
+    writer,
+    [
+      PLATFORM_HIGHLIGHTS_PROMPT,
+      '',
+      `Platform: ${platform}`,
+      `Number of bullets: ${target} or fewer`,
+      '',
+      'PR descriptions:',
+      ...descriptions.map((value) => `- ${value}`),
+    ].join('\n'),
+  );
+
+  // If the model ignored the cap, ask it once to compress its own bullets to the target while
+  // keeping every fact. This enforces the target without a blind slice that would drop coverage.
+  if (bullets.length > target) {
+    const compressed = await writerHighlightBullets(
+      writer,
+      [
+        `Rewrite the highlight bullets below into at most ${target} bullets for platform ${platform}.`,
+        'Merge related bullets. Every fact in the input must still appear in the output.',
+        'Each bullet: one sentence, at most 300 characters, starting with the feature or area, no markdown.',
+        'Output only the bullet lines, each starting with "- ".',
+        '',
+        ...bullets.map((value) => `- ${value}`),
+      ].join('\n'),
+    );
+    if (compressed.length && compressed.length < bullets.length) bullets = compressed;
+  }
+
+  // If the model still over-produced (a flaky call that never grouped), pack its bullets
+  // deterministically: this covers every one of them in far fewer bullets, so coverage holds
+  // without leaving a wall of one-bullet-per-PR output.
+  return bullets.length > target ? packDescriptions(bullets) : bullets;
+}
+
+async function writerHighlightBullets(writer, prompt) {
   const raw = await writer.write(prompt);
   return String(raw || '')
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.startsWith('- '))
     .map((line) => finalizePlatformBullet(line.replace(/^-\s*/, '')))
-    .filter(Boolean)
-    // Enforce the target the prompt asked for. If the model over-produces, keep the first `target`
-    // — it is told to lead with the most impactful work — and the PR List table still has the rest.
-    .slice(0, target);
+    .filter(Boolean);
 }
 
 function joinPhrases(values) {
