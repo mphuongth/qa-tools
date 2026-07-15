@@ -59,6 +59,7 @@ body::before{display:none}
 .ph{display:flex;align-items:baseline;gap:16px;margin-bottom:20px;padding-bottom:14px;border-bottom:1px solid rgba(227,216,204,.92)}
 .pname{font-size:20px;font-weight:600;letter-spacing:-.02em}
 .pcnt{font-size:13px;color:var(--faint);font-variant-numeric:tabular-nums}
+.fallback-note{margin:0 0 14px;font-size:13px;font-style:italic;color:var(--faint)}
 ul.bul{list-style:none;display:flex;flex-direction:column;gap:12px}
 ul.bul li{display:grid;grid-template-columns:20px 1fr;gap:10px;font-size:17px;line-height:1.65;color:#2C2825}
 ul.bul li::before{content:"—";color:var(--faint);font-weight:300}
@@ -345,6 +346,7 @@ function buildSlackMessage(report){
     title,
     ...groups.flatMap((group,index)=>[
       `${index+1}. ${group.platform}:`,
+      ...(group.highlightsMode==='fallback'?['   (highlights could not be grouped automatically; PR descriptions listed as-is)']:[]),
       ...(group.highlights||[]).map((item,itemIndex)=>`   ${letterForIndex(itemIndex)}. ${item}`)
     ])
   ].join('\n');
@@ -400,6 +402,7 @@ function renderGroups(){
     const countLabel=`${group.count} PR${group.count===1?'':'s'}`;
     return `<section class="plat ${cls}">
       <div class="ph"><h2 class="pname">${escapeHtml(group.platform)}</h2><span class="pcnt">${escapeHtml(countLabel)}</span></div>
+      ${group.highlightsMode==='fallback'&&(group.highlights||[]).length?'<p class="fallback-note">Highlights could not be grouped automatically — each PR description is listed as-is.</p>':''}
       <ul class="bul">${(group.highlights||[]).map(item=>`<li>${escapeHtml(item)}</li>`).join('')}</ul>
     </section>`;
   }).join('') || '<div class="empty-note">No report loaded yet.</div>';

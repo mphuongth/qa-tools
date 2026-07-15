@@ -449,7 +449,7 @@ export function renderProdDeliveryMarkdown(report) {
     lines.push(group.intro, '');
     if (group.highlightsMode === 'fallback' && group.highlights.length) {
       lines.push(
-        '_Highlights unavailable — no summarizer was configured, so each PR description is listed as-is rather than grouped._',
+        '_Highlights could not be grouped automatically — each PR description is listed as-is rather than summarized._',
         '',
       );
     }
@@ -1567,8 +1567,7 @@ async function generatePlatformHighlights(writer, platform, descriptions, target
   let best = null;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    const missing = best ? missingIds(best.covered, allIds) : [];
-    const prompt = attempt === 0
+    const prompt = attempt === 0 || !best
       ? [
           PLATFORM_HIGHLIGHTS_PROMPT.replace('${count}', String(target)),
           '',
@@ -1577,16 +1576,7 @@ async function generatePlatformHighlights(writer, platform, descriptions, target
           'Descriptions:',
           ...numbered,
         ].join('\n')
-      : [
-          `Revise the highlight bullets for platform ${platform}. Return the same JSON object shape:`,
-          '{"bullets":[{"text":"<one sentence>","ids":[<description numbers>]}]}',
-          `Use at most ${target} bullets. These description numbers were not covered and must each`,
-          `appear in some bullet's "ids": ${missing.join(', ')}. Fold them into the most related`,
-          'existing bullet where possible rather than adding new bullets. Same rules as before.',
-          '',
-          'Descriptions:',
-          ...numbered,
-        ].join('\n');
+      : buildHighlightRetryPrompt(platform, target, best, allIds, numbered);
 
     const groups = await writerHighlightGroups(writer, prompt);
     if (!groups.length) continue;
@@ -1595,18 +1585,54 @@ async function generatePlatformHighlights(writer, platform, descriptions, target
     for (const group of groups) {
       for (const id of group.ids) if (allIds.has(id)) covered.add(id);
     }
-    if (!best || covered.size > best.covered.size) best = { groups, covered };
-    if (covered.size === total) break;
+    // Prefer more coverage; among equally-covered results prefer fewer bullets (closer to target).
+    if (
+      !best
+      || covered.size > best.covered.size
+      || (covered.size === best.covered.size && groups.length < best.groups.length)
+    ) {
+      best = { groups, covered };
+    }
+    // Only stop when the result both covers every PR and is within the target bullet count. A run
+    // that covers everything but returns one bullet per PR is not done — it still needs grouping.
+    if (covered.size === total && groups.length <= target) break;
   }
 
   if (!best) return null;
 
-  const bullets = best.groups.map((group) => group.text).filter(Boolean);
+  let bullets = best.groups.map((group) => group.text).filter(Boolean);
   const missing = missingIds(best.covered, allIds);
   if (missing.length) {
     bullets.push(...packDescriptions(missing.map((id) => descriptions[id - 1])));
   }
+  // If the model never grouped down to the target, pack the bullets deterministically: every one
+  // survives (coverage holds) while the count drops toward the target.
+  if (bullets.length > target) {
+    bullets = packDescriptions(bullets);
+  }
   return bullets;
+}
+
+// The retry names exactly what the previous attempt got wrong — PRs it failed to cover and/or too
+// many bullets — so the model repairs those instead of being re-prompted from scratch.
+function buildHighlightRetryPrompt(platform, target, best, allIds, numbered) {
+  const missing = missingIds(best.covered, allIds);
+  const fixes = [];
+  if (best.groups.length > target) {
+    fixes.push(`You returned ${best.groups.length} bullets; use at most ${target}. Merge the most closely related bullets.`);
+  }
+  if (missing.length) {
+    fixes.push(`These description numbers were not covered and must each appear in some bullet's "ids": ${missing.join(', ')}.`);
+  }
+  return [
+    `Revise the highlight bullets for platform ${platform}. Return the same JSON object shape:`,
+    '{"bullets":[{"text":"<one sentence>","ids":[<description numbers>]}]}',
+    ...fixes,
+    'Keep every description number covered. Same rules as before.',
+    '',
+    'Descriptions:',
+    ...numbered,
+  ].join('\n');
 }
 
 function missingIds(covered, allIds) {
