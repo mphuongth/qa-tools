@@ -139,16 +139,18 @@ const REPORT_TIMEZONE_LABEL = process.env.PROD_DELIVERY_REPORT_TIMEZONE_LABEL ||
 // descriptions are the source of truth here, so the writer must not add anything they do not say.
 const PLATFORM_HIGHLIGHTS_PROMPT = `You group a platform's shipped pull requests into a few highlight bullets for a Product Owner reading a production delivery report.
 
-You are given one plain-English description per PR. Those descriptions are the source of truth. Summarize and group them — do not add facts they do not contain, and do not invent benefits.
+You are given one numbered plain-English description per PR. Those descriptions are the source of truth. Summarize and group them — do not add facts they do not contain, and do not invent benefits.
+
+Return ONLY a JSON object, with no prose and no markdown fences, shaped exactly:
+{"bullets":[{"text":"<one sentence>","ids":[<description numbers>]}]}
 
 Rules:
-- Return the requested number of bullets or fewer. Every PR description must be covered by some bullet — do not drop any.
-- Group PRs that are genuinely related into one bullet; keep unrelated work as its own bullet rather than forcing a merge.
-- Each bullet is one sentence, plain English a non-engineer can follow, and at most 300 characters (about 50 words). Write it concise from the start — do not rely on trimming.
-- Lead with the most user-facing or impactful work.
-- Start each bullet with the feature, system, or area — not a verb.
-- No marketing language, no line counts, no file names, no PR numbers, no markdown.
-- Output only the bullet lines, each starting with "- ".`;
+- At most ${'${count}'} bullets.
+- Every description number must appear in the "ids" of at least one bullet — cover all of them, drop none.
+- Group descriptions that are genuinely related into one bullet; keep unrelated work as its own bullet rather than forcing a merge.
+- Each "text" is one sentence, plain English a non-engineer can follow, at most 300 characters (about 50 words). Write it concise from the start — do not rely on trimming.
+- Lead with the most user-facing or impactful work. Start each sentence with the feature, system, or area — not a verb.
+- No marketing language, no line counts, no file names, no PR numbers, and no markdown inside "text".`;
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
@@ -299,12 +301,16 @@ export async function buildProdDeliveryReport({
     className: platformMeta(platform).key || 'other',
     items: rows.filter((row) => row.platform === platform),
     highlights: [],
+    highlightsMode: 'grouped',
   })).filter((group) => group.count > 0);
 
   await runWithConcurrency(platformGroups, DESCRIPTION_CONCURRENCY, async (group) => {
-    group.highlights =
-      curatedPlatformHighlights[group.platform] ||
-      (await buildPlatformHighlights(group.platform, group.items));
+    const curated = curatedPlatformHighlights[group.platform];
+    const result = curated
+      ? { bullets: curated, mode: 'grouped' }
+      : await buildPlatformHighlights(group.platform, group.items);
+    group.highlights = result.bullets;
+    group.highlightsMode = result.mode;
   });
 
   return {
@@ -441,6 +447,12 @@ export function renderProdDeliveryMarkdown(report) {
   for (const group of report.platformGroups) {
     lines.push(`### ${group.platform} (${group.count})`, '');
     lines.push(group.intro, '');
+    if (group.highlightsMode === 'fallback' && group.highlights.length) {
+      lines.push(
+        '_Highlights could not be grouped automatically — each PR description is listed as-is rather than summarized._',
+        '',
+      );
+    }
     for (const highlight of group.highlights) {
       lines.push(`- ${highlight}`);
     }
@@ -1485,6 +1497,10 @@ function platformSurfaceName(platform) {
 // Summarizes a platform's PRs into a few highlight bullets. The per-PR descriptions are already
 // accurate, so with a writer available we group them; without one we just list them. Neither path
 // invents content the descriptions do not contain.
+// Returns { bullets, mode }. mode is 'grouped' when a writer summarized the descriptions into the
+// target bullet count with verified coverage, or 'fallback' when no writer was available and the
+// descriptions could only be packed verbatim (complete coverage, but not a real summary — the
+// renderer labels it so a reader is not shown a wall of bullets as if it were a grouped summary).
 async function buildPlatformHighlights(platform, items) {
   const descriptions = items
     .map((item) => normalizeHumanText(cleanupSentence(item.description || item.title, 300)))
@@ -1492,11 +1508,11 @@ async function buildPlatformHighlights(platform, items) {
     .filter((value) => !isGenericDescription(value))
     .filter((value, index, values) => values.indexOf(value) === index);
 
-  if (!descriptions.length) return [];
+  if (!descriptions.length) return { bullets: [], mode: 'grouped' };
 
   // 1–3 PRs: each description is itself a highlight; grouping would only lose detail.
   if (descriptions.length <= 3) {
-    return descriptions.map((value) => finalizePlatformBullet(value));
+    return { bullets: descriptions.map((value) => finalizePlatformBullet(value)), mode: 'grouped' };
   }
 
   const target = highlightBulletTarget(descriptions.length);
@@ -1504,13 +1520,13 @@ async function buildPlatformHighlights(platform, items) {
   const writer = await resolveDescriptionWriter();
   if (writer) {
     const grouped = await generatePlatformHighlights(writer, platform, descriptions, target);
-    if (grouped.length) return grouped;
+    if (grouped && grouped.length) return { bullets: grouped, mode: 'grouped' };
   }
 
-  // Fallback with no writer: there is nothing to group semantically, but every description must
-  // still be represented. Pack them into bullets up to a length budget so all are covered while
-  // the count stays well below one-bullet-per-PR.
-  return packDescriptions(descriptions);
+  // No writer (or the writer failed): the descriptions cannot be summarized without an LLM, so
+  // every one is packed verbatim into as few bullets as fit. Coverage is complete, but the bullet
+  // count is not the grouped target — mode 'fallback' tells the renderer to say so.
+  return { bullets: packDescriptions(descriptions), mode: 'fallback' };
 }
 
 // 4–19 PRs: up to one bullet per PR (cap 8), so only genuinely related work gets grouped.
@@ -1540,51 +1556,116 @@ function packDescriptions(descriptions, maxLen = 280) {
   return bullets.map((value) => finalizePlatformBullet(value));
 }
 
+// Structured grouping with verified coverage. The model returns bullets tagged with the numbers of
+// the descriptions each one covers, so the code can check that every PR is actually represented and
+// retry for any that were missed — coverage is validated, not merely requested in the prompt. Any
+// description the model still never tags is appended (packed) so full coverage is guaranteed.
 async function generatePlatformHighlights(writer, platform, descriptions, target) {
-  let bullets = await writerHighlightBullets(
-    writer,
-    [
-      PLATFORM_HIGHLIGHTS_PROMPT,
-      '',
-      `Platform: ${platform}`,
-      `Number of bullets: ${target} or fewer`,
-      '',
-      'PR descriptions:',
-      ...descriptions.map((value) => `- ${value}`),
-    ].join('\n'),
-  );
+  const total = descriptions.length;
+  const allIds = new Set(descriptions.map((_, index) => index + 1));
+  const numbered = descriptions.map((value, index) => `${index + 1}. ${value}`);
+  let best = null;
 
-  // If the model ignored the cap, ask it once to compress its own bullets to the target while
-  // keeping every fact. This enforces the target without a blind slice that would drop coverage.
-  if (bullets.length > target) {
-    const compressed = await writerHighlightBullets(
-      writer,
-      [
-        `Rewrite the highlight bullets below into at most ${target} bullets for platform ${platform}.`,
-        'Merge related bullets. Every fact in the input must still appear in the output.',
-        'Each bullet: one sentence, at most 300 characters, starting with the feature or area, no markdown.',
-        'Output only the bullet lines, each starting with "- ".',
-        '',
-        ...bullets.map((value) => `- ${value}`),
-      ].join('\n'),
-    );
-    if (compressed.length && compressed.length < bullets.length) bullets = compressed;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const prompt = attempt === 0 || !best
+      ? [
+          PLATFORM_HIGHLIGHTS_PROMPT.replace('${count}', String(target)),
+          '',
+          `Platform: ${platform}`,
+          '',
+          'Descriptions:',
+          ...numbered,
+        ].join('\n')
+      : buildHighlightRetryPrompt(platform, target, best, allIds, numbered);
+
+    const groups = await writerHighlightGroups(writer, prompt);
+    if (!groups.length) continue;
+
+    const covered = new Set();
+    for (const group of groups) {
+      for (const id of group.ids) if (allIds.has(id)) covered.add(id);
+    }
+    // Prefer more coverage; among equally-covered results prefer fewer bullets (closer to target).
+    if (
+      !best
+      || covered.size > best.covered.size
+      || (covered.size === best.covered.size && groups.length < best.groups.length)
+    ) {
+      best = { groups, covered };
+    }
+    // Only stop when the result both covers every PR and is within the target bullet count. A run
+    // that covers everything but returns one bullet per PR is not done — it still needs grouping.
+    if (covered.size === total && groups.length <= target) break;
   }
 
-  // If the model still over-produced (a flaky call that never grouped), pack its bullets
-  // deterministically: this covers every one of them in far fewer bullets, so coverage holds
-  // without leaving a wall of one-bullet-per-PR output.
-  return bullets.length > target ? packDescriptions(bullets) : bullets;
+  if (!best) return null;
+
+  const bullets = best.groups.map((group) => group.text).filter(Boolean);
+  const missing = missingIds(best.covered, allIds);
+  if (missing.length) {
+    bullets.push(...packDescriptions(missing.map((id) => descriptions[id - 1])));
+  }
+  // Still over target after both attempts: this is not a successful grouped summary. Return null so
+  // the caller uses the labeled verbatim fallback instead of presenting an over-target result as
+  // grouped — trimming to fit would drop covered PRs, which the fallback's warning would not admit.
+  if (bullets.length > target) return null;
+  return bullets;
 }
 
-async function writerHighlightBullets(writer, prompt) {
+// The retry names exactly what the previous attempt got wrong — PRs it failed to cover and/or too
+// many bullets — so the model repairs those instead of being re-prompted from scratch.
+function buildHighlightRetryPrompt(platform, target, best, allIds, numbered) {
+  const missing = missingIds(best.covered, allIds);
+  const fixes = [];
+  if (best.groups.length > target) {
+    fixes.push(`You returned ${best.groups.length} bullets; use at most ${target}. Merge the most closely related bullets.`);
+  }
+  if (missing.length) {
+    fixes.push(`These description numbers were not covered and must each appear in some bullet's "ids": ${missing.join(', ')}.`);
+  }
+  return [
+    `Revise the highlight bullets for platform ${platform}. Return the same JSON object shape:`,
+    '{"bullets":[{"text":"<one sentence>","ids":[<description numbers>]}]}',
+    ...fixes,
+    'Keep every description number covered. Same rules as before.',
+    '',
+    'Descriptions:',
+    ...numbered,
+  ].join('\n');
+}
+
+function missingIds(covered, allIds) {
+  const missing = [];
+  for (const id of allIds) if (!covered.has(id)) missing.push(id);
+  return missing;
+}
+
+// Parses the model's JSON grouping into { text, ids } bullets. Tolerates markdown fences or stray
+// prose around the object. Returns [] if nothing parseable came back.
+async function writerHighlightGroups(writer, prompt) {
   const raw = await writer.write(prompt);
-  return String(raw || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith('- '))
-    .map((line) => finalizePlatformBullet(line.replace(/^-\s*/, '')))
-    .filter(Boolean);
+  const parsed = parseJsonObject(raw);
+  const bullets = Array.isArray(parsed?.bullets) ? parsed.bullets : [];
+  return bullets
+    .map((bullet) => ({
+      text: finalizePlatformBullet(String(bullet?.text || '')),
+      ids: Array.isArray(bullet?.ids)
+        ? bullet.ids.map((id) => Number(id)).filter((id) => Number.isInteger(id))
+        : [],
+    }))
+    .filter((bullet) => bullet.text);
+}
+
+function parseJsonObject(raw) {
+  const text = String(raw || '');
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    return JSON.parse(text.slice(start, end + 1));
+  } catch {
+    return null;
+  }
 }
 
 function joinPhrases(values) {
