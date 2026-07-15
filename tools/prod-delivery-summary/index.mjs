@@ -1095,7 +1095,10 @@ function buildReviewWarnings({
     warnings.push(`Kept saved platform "${platformChoice.platform}", but changed files look like "${platformChoice.fileHint}"; verify.`);
   }
   if (platformChoice.crossPlatform && platformChoice.crossPlatform.length > 1) {
-    warnings.push(`PR spans multiple product platforms (${platformChoice.crossPlatform.join(', ')}); primary chosen by file count.`);
+    const spanned = platformChoice.crossPlatform.join(', ');
+    warnings.push(platformChoice.source === 'saved reference'
+      ? `PR spans multiple product platforms (${spanned}); kept the reviewed platform "${platformChoice.platform}".`
+      : `PR spans multiple product platforms (${spanned}); primary "${platformChoice.platform}" chosen by file count.`);
   }
   // A specific saved platform wins outright, so a leftover disagreement here means the saved value
   // is malformed (not in the known set) and was skipped.
@@ -1496,15 +1499,18 @@ async function buildPlatformHighlights(platform, items) {
     return descriptions.map((value) => finalizePlatformBullet(value));
   }
 
+  const target = highlightBulletTarget(descriptions.length);
+
   const writer = await resolveDescriptionWriter();
   if (writer) {
-    const grouped = await generatePlatformHighlights(writer, platform, descriptions);
+    const grouped = await generatePlatformHighlights(writer, platform, descriptions, target);
     if (grouped.length) return grouped;
   }
 
-  // Fallback with no writer: list every description. Verbose, but nothing is dropped and no
-  // bullet claims anything the descriptions do not already say.
-  return descriptions.map((value) => finalizePlatformBullet(value));
+  // Fallback with no writer: there is nothing to group with, so keep the first `target`
+  // descriptions as the highlights. No detail is lost — the full PR List table below the summary
+  // still lists every PR with its description.
+  return descriptions.slice(0, target).map((value) => finalizePlatformBullet(value));
 }
 
 // 4–19 PRs: up to one bullet per PR (cap 8), so only genuinely related work gets grouped.
@@ -1514,13 +1520,12 @@ function highlightBulletTarget(count) {
   return Math.max(4, Math.min(8, Math.round(count / 8)));
 }
 
-async function generatePlatformHighlights(writer, platform, descriptions) {
-  const count = highlightBulletTarget(descriptions.length);
+async function generatePlatformHighlights(writer, platform, descriptions, target) {
   const prompt = [
     PLATFORM_HIGHLIGHTS_PROMPT,
     '',
     `Platform: ${platform}`,
-    `Number of bullets: ${count} or fewer`,
+    `Number of bullets: ${target} or fewer`,
     '',
     'PR descriptions:',
     ...descriptions.map((value) => `- ${value}`),
@@ -1533,9 +1538,9 @@ async function generatePlatformHighlights(writer, platform, descriptions) {
     .filter((line) => line.startsWith('- '))
     .map((line) => finalizePlatformBullet(line.replace(/^-\s*/, '')))
     .filter(Boolean)
-    // count is the instruction to the model; cap at the PR count only as a runaway guard so a
-    // malformed reply can't explode, never tight enough to drop a legitimately grouped bullet.
-    .slice(0, descriptions.length);
+    // Enforce the target the prompt asked for. If the model over-produces, keep the first `target`
+    // — it is told to lead with the most impactful work — and the PR List table still has the rest.
+    .slice(0, target);
 }
 
 function joinPhrases(values) {
