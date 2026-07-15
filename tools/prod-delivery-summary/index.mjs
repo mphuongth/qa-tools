@@ -1600,16 +1600,15 @@ async function generatePlatformHighlights(writer, platform, descriptions, target
 
   if (!best) return null;
 
-  let bullets = best.groups.map((group) => group.text).filter(Boolean);
+  const bullets = best.groups.map((group) => group.text).filter(Boolean);
   const missing = missingIds(best.covered, allIds);
   if (missing.length) {
     bullets.push(...packDescriptions(missing.map((id) => descriptions[id - 1])));
   }
-  // If the model never grouped down to the target, pack the bullets deterministically: every one
-  // survives (coverage holds) while the count drops toward the target.
-  if (bullets.length > target) {
-    bullets = packDescriptions(bullets);
-  }
+  // Still over target after both attempts: this is not a successful grouped summary. Return null so
+  // the caller uses the labeled verbatim fallback instead of presenting an over-target result as
+  // grouped — trimming to fit would drop covered PRs, which the fallback's warning would not admit.
+  if (bullets.length > target) return null;
   return bullets;
 }
 
