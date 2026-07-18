@@ -35,6 +35,7 @@ const GENERATED_ROOT = path.join(APP_DIR, '.generated');
 const LANDING_HTML_PATHS = [path.join(APP_DIR, 'landing.html')];
 /** One stylesheet for every page, so the hub and its tools stay one system. */
 const CONSOLE_CSS_PATH = path.join(APP_DIR, 'assets', 'console.css');
+const FAVICON_PATH = path.join(APP_DIR, 'assets', 'favicon.svg');
 const CACHE_ROOT = process.env.QA_TOOLS_CACHE_DIR || path.join(os.homedir(), '.cache', 'qa-tools');
 const TRACKER_DIR = path.join(CACHE_ROOT, 'pr-tracker');
 const SERVER_ERROR_LOG = path.join(GENERATED_ROOT, 'server-error.log');
@@ -198,6 +199,10 @@ async function handleRequest(req, res) {
 
     if (req.method === 'GET' && url.pathname === '/assets/console.css') {
       return send(res, 200, await readFile(CONSOLE_CSS_PATH, 'utf8'), 'text/css; charset=utf-8');
+    }
+
+    if (req.method === 'GET' && url.pathname === '/assets/favicon.svg') {
+      return send(res, 200, await readFile(FAVICON_PATH, 'utf8'), 'image/svg+xml; charset=utf-8');
     }
 
     if (req.method === 'GET' && url.pathname === '/api/tools') {

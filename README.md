@@ -1,7 +1,13 @@
-# QA Tools
+<div align="center">
+  <img src="apps/hub/assets/favicon.svg" width="72" height="72" alt="QA Tools logo">
+  <h1>QA Tools</h1>
+  <p>
+    <strong>QA and release tooling that runs against any GitHub repo</strong><br>
+    A local web hub or a set of CLIs — point it at a repo and it works, with no per-project code changes.
+  </p>
+</div>
 
-QA and release tooling that runs against **any GitHub repo** — as a local web hub or as CLIs.
-Point it at a repo and it works, with no per-project code changes.
+## Tools
 
 | Tool | What it does |
 | --- | --- |
@@ -11,6 +17,14 @@ Point it at a repo and it works, with no per-project code changes.
 
 Need to shrink a screen recording before attaching it to a PR? That lives in
 [video-tools](https://github.com/mphuongth/video-tools) — these tools all talk to GitHub, that one does not.
+
+<div align="center">
+  <img src="docs/hub.png" width="820" alt="The QA Tools hub — one repo, every tool follows it">
+</div>
+
+> [!NOTE]
+> Runs entirely on your machine. It talks to GitHub through your own `gh` login — no accounts, no
+> data leaves your laptop.
 
 ## Requirements
 
