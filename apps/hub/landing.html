@@ -144,15 +144,18 @@
       color: var(--accent-hot);
     }
 
-    /* Tools */
-    .tools { display: grid; gap: 10px; }
+    /* Tools — each one is a card anchored by an icon tile in the favicon's language. */
+    .tools {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(248px, 1fr));
+      gap: 12px;
+    }
 
     .tool {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      gap: 20px;
-      padding: 18px;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: var(--r-lg);
@@ -162,26 +165,37 @@
 
     .tool:hover {
       border-color: var(--accent-line);
-      transform: translateY(-1px);
+      transform: translateY(-2px);
       box-shadow: var(--shadow-2);
     }
 
-    .tool-name {
-      display: flex;
+    .tool-mark {
+      display: inline-flex;
       align-items: center;
-      gap: 9px;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      margin-bottom: 15px;
+      color: var(--on-accent);
+      background: linear-gradient(140deg, var(--accent-hot), var(--accent));
+      border-radius: 10px;
+      box-shadow: 0 0 0 1px var(--accent-line), inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 2px 8px rgba(94, 106, 210, 0.35);
+    }
+
+    .tool-name {
       font-size: 15px;
       font-weight: 600;
       color: var(--text);
-      margin-bottom: 5px;
+      margin-bottom: 6px;
     }
 
+    /* Grows to fill, so tags sit on a shared baseline across the row. */
     .tool-desc {
+      flex: 1 1 auto;
       color: var(--text-2);
       font-size: 13px;
       line-height: 1.55;
-      max-width: 68ch;
-      margin-bottom: 10px;
+      margin-bottom: 16px;
     }
 
     .tool-tags { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -201,36 +215,25 @@
 
     .tag.out { color: var(--accent-hot); background: var(--accent-soft); border-color: var(--accent-line); }
 
+    /* A quiet "open" cue in the corner; it wakes up only when the card does. */
     .tool-go {
+      position: absolute;
+      top: 20px;
+      right: 18px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 32px;
-      height: 32px;
-      color: var(--muted);
-      background: var(--surface-2);
-      border: 1px solid var(--border);
-      border-radius: var(--r-sm);
-      transition: color 150ms var(--ease), background 150ms var(--ease), transform 150ms var(--ease);
+      color: var(--faint);
+      transition: color 150ms var(--ease), transform 150ms var(--ease);
     }
 
-    .tool:hover .tool-go {
-      color: var(--on-accent);
-      background: var(--accent);
-      border-color: transparent;
-      transform: translateX(2px);
-    }
-
-    @media (max-width: 640px) {
-      .tool { grid-template-columns: 1fr; }
-      .tool-go { justify-self: start; }
-    }
+    .tool:hover .tool-go { color: var(--accent-hot); transform: translateX(3px); }
   </style>
 </head>
 <body>
   <header class="topbar">
     <a class="wordmark" href="/">
-      <span class="mark" aria-hidden="true"></span>
+      <img class="mark" src="/assets/favicon.svg" alt="" aria-hidden="true" />
       QA Tools
     </a>
     <span class="crumb" aria-hidden="true">/</span>
@@ -561,16 +564,15 @@
         .map(
           (tool) => `
         <a class="tool" href="${tool.href}">
-          <div>
-            <div class="tool-name">${escapeHtml(tool.title)}</div>
-            <p class="tool-desc">${escapeHtml(tool.description)}</p>
-            <div class="tool-tags">
-              <span class="tag">Needs ${escapeHtml(tool.needs)}</span>
-              ${tool.produces ? `<span class="tag out">Gives ${escapeHtml(tool.produces)}</span>` : ''}
-            </div>
+          <span class="tool-mark" aria-hidden="true">${toolGlyph(tool.icon)}</span>
+          <div class="tool-name">${escapeHtml(tool.title)}</div>
+          <p class="tool-desc">${escapeHtml(tool.description)}</p>
+          <div class="tool-tags">
+            <span class="tag">Needs ${escapeHtml(tool.needs)}</span>
+            ${tool.produces ? `<span class="tag out">Gives ${escapeHtml(tool.produces)}</span>` : ''}
           </div>
           <span class="tool-go" aria-hidden="true">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M5 12h14" /><path d="m12 5 7 7-7 7" />
             </svg>
           </span>
@@ -578,6 +580,22 @@
       `,
         )
         .join('');
+    }
+
+    /* One glyph per tool, drawn from what it works with: rollout branches, a
+       delivered package, a run-through checklist. Keyed by the tool's icon id. */
+    const TOOL_GLYPHS = {
+      'pr-tracker':
+        '<line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />',
+      'prod-delivery-summary':
+        '<path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" /><path d="M3.3 7 12 12l8.7-5" /><path d="M12 22V12" />',
+      'qa-pr-impact':
+        '<path d="m3 7 2 2 4-4" /><path d="m3 17 2 2 4-4" /><path d="M13 6h8" /><path d="M13 12h8" /><path d="M13 18h8" />',
+    };
+
+    function toolGlyph(icon) {
+      const inner = TOOL_GLYPHS[icon] || TOOL_GLYPHS['qa-pr-impact'];
+      return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
     }
 
     /**
